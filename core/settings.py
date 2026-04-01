@@ -91,12 +91,11 @@ WSGI_APPLICATION = 'core.wsgi.application'
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
 DATABASES = {
-    'default': dj_database_url.config(
-        default=os.environ.get('DATABASE_URL'),
-        conn_max_age=600,
-        ssl_require=True
-    )
+    'default': dj_database_url.parse("postgresql://postgres:rDHRvQeLgFaJbzkWIXYwIiJcBUeihowb@interchange.proxy.rlwy.net:15107/railway")
 }
+DATABASES['default']['CONN_MAX_AGE'] = 600
+# If it fails with an SSL error, add this line:
+# DATABASES['default']['OPTIONS'] = {'sslmode': 'require'}
 
 
 # Password validation
