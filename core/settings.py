@@ -31,6 +31,10 @@ ALLOWED_HOSTS = ['office-workplan-production.up.railway.app',
     'localhost', 
     '127.0.0.1']
 
+CSRF_TRUSTED_ORIGINS = [
+    'https://office-workplan-production.up.railway.app'
+]
+
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
