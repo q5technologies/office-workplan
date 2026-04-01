@@ -27,7 +27,9 @@ SECRET_KEY = 'django-insecure-%tol7z3z-k#!k%!vpm3fh3zd0^0v^zzr3f3soiud^#hmiu7_p3
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ['office-workplan-production.up.railway.app', 
+    'localhost', 
+    '127.0.0.1']
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
