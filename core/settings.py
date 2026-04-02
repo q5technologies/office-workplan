@@ -157,7 +157,7 @@ PWA_APP_STATUS_BAR_COLOR = 'default'
 PWA_APP_ICONS = [
     {
         'src': '/static/images/icon-160.png',
-        'sizes': '160x160'
+        'sizes': '192x192'
     }
 ]
 PWA_APP_ICONS_APPLE = [
