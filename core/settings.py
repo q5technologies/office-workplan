@@ -158,7 +158,7 @@ PWA_APP_ICONS = [
     {
         'src': '/static/images/icon-192.png',
         'sizes': '192x192'
-    }
+    },
     {
         'src': '/static/images/icon-512.png',
         'sizes': '512x512'
