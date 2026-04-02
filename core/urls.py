@@ -32,4 +32,5 @@ urlpatterns = [
     path('api-auth/', include('rest_framework.urls')),
     path('api/notes/', NoteCreateView.as_view(), name='note-create'),
     path('api/task-list/', TaskListCreateView.as_view(), name='task-list'),
+    path('', include('pwa.urls')),
 ]
