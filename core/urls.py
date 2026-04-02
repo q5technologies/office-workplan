@@ -19,18 +19,19 @@ from django.urls import path, include
 from rest_framework.authtoken import views as auth_views # Added 'as auth_views'
 from users.views import get_user_profile # Import the new view
 from rest_framework.routers import DefaultRouter
-from tasks.views import TaskViewSet, NoteCreateView, TaskListCreateView, ProfileViewSet
+from tasks.views import TaskViewSet, NoteCreateView, TaskListCreateView, ProfileViewSet, index_view
 
 router = DefaultRouter()
 router.register(r'tasks', TaskViewSet, basename='task')
 router.register(r'profiles', ProfileViewSet, basename='profile')
 urlpatterns = [
-    path('api/', include(router.urls)),
     path('admin/', admin.site.urls), # Fixed a small double 'admin' typo here too
+    path('', index_view, name='index'),
+    path('', include('pwa.urls')),
+    path('api/', include(router.urls)),
     path('api-token-auth/', auth_views.obtain_auth_token), # Changed to auth_views.obtain_auth_token
     path('api/profile/', get_user_profile, name='user-profile'), # Added this line
     path('api-auth/', include('rest_framework.urls')),
     path('api/notes/', NoteCreateView.as_view(), name='note-create'),
     path('api/task-list/', TaskListCreateView.as_view(), name='task-list'),
-    path('', include('pwa.urls')),
 ]

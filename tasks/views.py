@@ -258,3 +258,10 @@ class ProfileViewSet(viewsets.ModelViewSet):
             return Response({"message": f"{sub_profile.user.username} now reports to {sup_user.username}"})
         except (Profile.DoesNotExist, User.DoesNotExist):
             return Response({"error": "User not found or roles incorrect"}, status=400)
+        
+def index_view(request):
+    """
+    This is the landing page for your PWA.
+    It will load your base.html which contains the PWA meta tags.
+    """
+    return render(request, 'index.html')
