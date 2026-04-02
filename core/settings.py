@@ -187,6 +187,13 @@ PWA_APP_SCREENSHOTS = [
         'type': 'image/png',
         'form_factor': 'narrow',
         'label': 'Task Supervisor Home Screen'
+    },
+    {
+        'src': '/static/images/screenshot2.png',
+        'sizes': '1366x720',
+        'type': 'image/png',
+        'form_factor': 'wide',
+        'label': 'Task Supervisor Desktop Dashboard'
     }
 ]
 PWA_APP_DIR = 'ltr'
