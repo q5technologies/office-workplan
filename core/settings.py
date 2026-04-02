@@ -176,8 +176,17 @@ PWA_APP_ICONS_APPLE = [
 ]
 PWA_APP_SPLASH_SCREEN = [
     {
-        'src': '/static/images/icon-160.png',
+        'src': '/static/images/icon-192.png',
         'media': '(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2)'
+    }
+]
+PWA_APP_SCREENSHOTS = [
+    {
+        'src': '/static/images/screenshot1.png',
+        'sizes': '1080x2340',
+        'type': 'image/png',
+        'form_factor': 'narrow',
+        'label': 'Task Supervisor Home Screen'
     }
 ]
 PWA_APP_DIR = 'ltr'
