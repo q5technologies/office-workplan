@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import Task, Note, User
 from users.models import Profile
+from django.contrib.auth.models import User
 
 class NoteSerializer(serializers.ModelSerializer):
     # Change task to read_only=True
@@ -51,3 +52,11 @@ class ProfileSerializer(serializers.ModelSerializer):
         model = Profile
         # Add 'user_id' to the fields list
         fields = ['id', 'user_id', 'username', 'role', 'assigned_supervisor']
+
+class ChangePasswordSerializer(serializers.Serializer):
+    old_password = serializers.CharField(required=True)
+    new_password = serializers.CharField(required=True, min_length=8)
+
+    def validate_new_password(self, value):
+        # Optional: Add extra validation like checking for numbers/symbols here
+        return value

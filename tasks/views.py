@@ -6,7 +6,7 @@ from rest_framework.decorators import action  # <--- Add this import
 from django.db.models import Q 
 from .models import Task, Note
 from users.models import Profile # Make sure to import your Profile model
-from .serializers import TaskSerializer, NoteSerializer, ProfileSerializer
+from .serializers import TaskSerializer, NoteSerializer, ProfileSerializer, ChangePasswordSerializer
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist
@@ -257,6 +257,29 @@ class ProfileViewSet(viewsets.ModelViewSet):
                 {"error": "No profile found for this user. Please create one in the admin panel."}, 
                 status=status.HTTP_404_NOT_FOUND
             )
+    
+    @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
+    def change_password(self, request):
+        """
+        Endpoint: /api/profiles/change_password/
+        Allows a logged-in user to update their own password.
+        """
+        serializer = ChangePasswordSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            user = request.user
+            # Check if the old password is correct
+            if not user.check_password(serializer.data.get('old_password')):
+                return Response({"old_password": ["Wrong current password."]}, 
+                                status=status.HTTP_400_BAD_REQUEST)
+            
+            # Set and save the new password
+            user.set_password(serializer.data.get('new_password'))
+            user.save()
+            
+            return Response({"message": "Password updated successfully!"}, status=status.HTTP_200_OK)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['post'])
     def link_subordinate(self, request):
