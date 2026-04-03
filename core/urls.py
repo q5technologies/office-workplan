@@ -25,12 +25,12 @@ router = DefaultRouter()
 router.register(r'tasks', TaskViewSet, basename='task')
 router.register(r'profiles', ProfileViewSet, basename='profile')
 urlpatterns = [
-    path('admin/', admin.site.urls), # Fixed a small double 'admin' typo here too
+    path('admin/', admin.site.urls),
     path('', index_view, name='index'),
     path('', include('pwa.urls')),
-    path('api/', include(router.urls)),
-    path('api-token-auth/', auth_views.obtain_auth_token), # Changed to auth_views.obtain_auth_token
-    path('api/profile/', get_user_profile, name='user-profile'), # Added this line
+    path('api/', include(router.urls)), # This handles /api/tasks/ AND /api/profiles/
+    path('api-token-auth/', auth_views.obtain_auth_token),
+    # REMOVE THIS LINE: path('api/profile/', get_user_profile, name='user-profile'), 
     path('api-auth/', include('rest_framework.urls')),
     path('api/notes/', NoteCreateView.as_view(), name='note-create'),
     path('api/task-list/', TaskListCreateView.as_view(), name='task-list'),
