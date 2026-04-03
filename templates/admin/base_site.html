@@ -1,0 +1,17 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block branding %}
+<h1 id="site-name"><a href="{% url 'admin:index' %}">Office Workplan</a></h1>
+{% endblock %}
+
+{% block nav-global %}{% endblock %}
+
+{% block footer %}
+<div id="footer" style="text-align: center; padding: 20px; background: #2c3e50; color: white;">
+    <p>&copy; {% now "Y" %} Powered by Q5Technologies|| Contact Us: 0546377887 || All Rights Reserved</p>
+    <p style="font-size: 0.8em; color: #bdc3c7;">Version 1.0.4</p>
+</div>
+{{ block.super }}
+{% endblock %}
