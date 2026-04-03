@@ -1,6 +1,7 @@
 from django.shortcuts import render
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action  # <--- Add this import
 from django.db.models import Q 
 from .models import Task, Note
@@ -8,6 +9,7 @@ from users.models import Profile # Make sure to import your Profile model
 from .serializers import TaskSerializer, NoteSerializer, ProfileSerializer
 from django.db import models
 from django.contrib.auth.models import User
+from django.core.exceptions import ObjectDoesNotExist
 
 # 1. Your original Generic Views (Maintained)
 class TaskListCreateView(generics.ListCreateAPIView):
@@ -237,28 +239,68 @@ class TaskViewSet(viewsets.ModelViewSet):
 class ProfileViewSet(viewsets.ModelViewSet):
     queryset = Profile.objects.all()
     serializer_class = ProfileSerializer
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['get'])
+    def me(self, request):
+        """
+        Endpoint: /api/profiles/me/
+        Safely returns the profile of the currently logged-in user.
+        """
+        try:
+            # This is where the 500 error usually happens if the profile is missing
+            profile = request.user.profile
+            serializer = self.get_serializer(profile)
+            return Response(serializer.data)
+        except (ObjectDoesNotExist, AttributeError):
+            return Response(
+                {"error": "No profile found for this user. Please create one in the admin panel."}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
 
     @action(detail=False, methods=['post'])
     def link_subordinate(self, request):
-        """Allows HEAD to assign a SUB to a SUP."""
-        if request.user.profile.role != 'HEAD':
-            return Response({"error": "Only HEAD can set reporting lines"}, status=403)
+        """
+        Endpoint: /api/profiles/link_subordinate/
+        Allows HEAD to assign a SUB to a SUP.
+        """
+        # 1. Safety check: Does the requester even have a profile?
+        try:
+            requesting_user_profile = request.user.profile
+        except (ObjectDoesNotExist, AttributeError):
+            return Response({"error": "Your user account has no profile assigned."}, status=403)
+
+        # 2. Role check
+        if requesting_user_profile.role != 'HEAD':
+            return Response({"error": "Only HEAD users can set reporting lines"}, status=403)
 
         sub_id = request.data.get('subordinate_id')
         sup_id = request.data.get('supervisor_id')
 
+        if not sub_id or not sup_id:
+            return Response({"error": "Both subordinate_id and supervisor_id are required."}, status=400)
+
         try:
-            # Look for the profile of the subordinate
+            # 3. Look for the profile of the subordinate
             sub_profile = Profile.objects.get(user_id=sub_id, role='SUB')
-            # Look for the user object of the supervisor
+            
+            # 4. Look for the user object of the supervisor (must have SUP role)
             sup_user = User.objects.get(id=sup_id, profile__role='SUP')
             
+            # 5. Perform the link
             sub_profile.assigned_supervisor = sup_user
             sub_profile.save()
             
-            return Response({"message": f"{sub_profile.user.username} now reports to {sup_user.username}"})
-        except (Profile.DoesNotExist, User.DoesNotExist):
-            return Response({"error": "User not found or roles incorrect"}, status=400)
+            return Response({
+                "message": f"Success: {sub_profile.user.username} now reports to {sup_user.username}"
+            })
+
+        except Profile.DoesNotExist:
+            return Response({"error": "Subordinate profile not found or role is not 'SUB'"}, status=404)
+        except User.DoesNotExist:
+            return Response({"error": "Supervisor not found or role is not 'SUP'"}, status=404)
+        except Exception as e:
+            return Response({"error": f"An unexpected error occurred: {str(e)}"}, status=500)
         
 def index_view(request):
     """
