@@ -46,6 +46,12 @@ class CustomUserAdmin(UserAdmin):
                 
         super().save_model(request, obj, form, change)
 
+        # 3. Handle Creator Tagging (for brand new users)
+        if not change: 
+            # The signal in models.py has already created the profile.
+            # We now update that profile to set YOU as the creator.
+            Profile.objects.filter(user=obj).update(created_by=request.user)
+
 
 admin.site.unregister(User)
 admin.site.register(User, CustomUserAdmin)
