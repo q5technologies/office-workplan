@@ -35,6 +35,9 @@ urlpatterns = [
     path('api/notes/', NoteCreateView.as_view(), name='note-create'),
     path('api/task-list/', TaskListCreateView.as_view(), name='task-list'),
 ]
+
 admin.site.site_header = "Office Workplan"
 admin.site.site_title = "Office Workplan Portal"
 admin.site.index_title = "Welcome to the Office Workplan Administration"
+
+admin.site.site_url = None

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import Task, Note, User
-from users.models import Profile
+from users.models import Profile, Subscription
 from django.contrib.auth.models import User
 
 class NoteSerializer(serializers.ModelSerializer):
@@ -60,3 +60,24 @@ class ChangePasswordSerializer(serializers.Serializer):
     def validate_new_password(self, value):
         # Optional: Add extra validation like checking for numbers/symbols here
         return value
+    
+class TenantUserCreateSerializer(serializers.ModelSerializer):
+    role = serializers.ChoiceField(choices=['HEAD', 'SUP', 'SUB'], write_only=True)
+    password = serializers.CharField(write_only=True)
+
+    class Meta:
+        model = User
+        fields = ['username', 'password', 'first_name', 'last_name', 'role']
+
+    def create(self, validated_data):
+        role = validated_data.pop('role')
+        user = User.objects.create_user(**validated_data)
+        
+        # Link the new user to the creator's tenant
+        creator_profile = self.context['request'].user.profile
+        user.profile.role = role
+        user.profile.tenant = creator_profile.tenant
+        user.profile.created_by = self.context['request'].user
+        user.profile.save()
+        
+        return user

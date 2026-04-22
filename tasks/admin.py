@@ -3,7 +3,17 @@ from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
 from django.db.models import Q
 from .models import Task, Note
-from users.models import Profile
+from users.models import Profile, Subscription # <--- IMPORT Subscription
+
+# ==========================================
+# NEW: SUBSCRIPTION MANAGEMENT
+# ==========================================
+@admin.register(Subscription)
+class SubscriptionAdmin(admin.ModelAdmin):
+    list_display = ('name', 'owner', 'max_users', 'is_active', 'expiry_date')
+    list_filter = ('is_active',)
+    search_fields = ('name', 'owner__username')
+
 
 # ==========================================
 # 1. USER & PROFILE MANAGEMENT
@@ -14,16 +24,16 @@ class CustomUserAdmin(UserAdmin):
         qs = super().get_queryset(request)
         
         if request.user.is_superuser:
-            # Superuser sees:
+            # MULTI-TENANT PRIVACY: Superuser ONLY sees:
             # 1. Themselves
-            # 2. Other Admins (Staff and Superusers) so they can manage their status
-            # 3. Regular users the Superuser personally created
-            # 4. Regular users the Superuser personally supervises
+            # 2. Other Admins (Staff and Superusers)
+            # 3. SUBSCRIBERs (The company account owners)
+            # 4. NEW ADDITION: Users who don't belong to a tenant yet (so you don't lose new accounts!)
             return qs.filter(
                 Q(id=request.user.id) | 
                 Q(is_staff=True) | Q(is_superuser=True) |
-                Q(profile__created_by=request.user) | 
-                Q(profile__assigned_supervisor=request.user)
+                Q(profile__role='SUBSCRIBER') |
+                Q(profile__tenant__isnull=True)  # <--- This prevents newly created users from vanishing
             ).distinct()
         
         # Assigned admins only see themselves, those they created, and those they supervise
@@ -40,6 +50,7 @@ class CustomUserAdmin(UserAdmin):
             old_user = User.objects.get(pk=obj.pk)
             
             # Check if the user WAS active, but is NOW deactivated
+            # For SaaS: If you deactivate a Subscriber, this locks out their whole company
             if old_user.is_active and not obj.is_active:
                 # Deactivate all users created by this admin in one bulk query
                 User.objects.filter(profile__created_by=obj).update(is_active=False)
@@ -52,13 +63,13 @@ class CustomUserAdmin(UserAdmin):
             # We now update that profile to set YOU as the creator.
             Profile.objects.filter(user=obj).update(created_by=request.user)
 
-
 admin.site.unregister(User)
 admin.site.register(User, CustomUserAdmin)
 
 @admin.register(Profile)
 class ProfileAdmin(admin.ModelAdmin):
-    list_display = ['user', 'role', 'assigned_supervisor', 'created_by']
+    # Added tenant to the list display so you can easily see what company they belong to
+    list_display = ['user', 'role', 'tenant', 'assigned_supervisor', 'created_by']
     readonly_fields = ['created_by']
 
     def get_queryset(self, request):
@@ -69,8 +80,7 @@ class ProfileAdmin(admin.ModelAdmin):
             return qs.filter(
                 Q(user=request.user) | 
                 Q(user__is_staff=True) | Q(user__is_superuser=True) |
-                Q(created_by=request.user) | 
-                Q(assigned_supervisor=request.user)
+                Q(role='SUBSCRIBER')
             ).distinct()
 
         return qs.filter(
@@ -85,8 +95,9 @@ class ProfileAdmin(admin.ModelAdmin):
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
 
+
 # ==========================================
-# 2. TASK & NOTE PRIVACY (Remains Unchanged)
+# 2. TASK & NOTE PRIVACY (Updated for SaaS Privacy)
 # ==========================================
 
 class NoteInline(admin.TabularInline):
@@ -101,6 +112,11 @@ class TaskAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)
+        
+        if request.user.is_superuser:
+            # STRICT PRIVACY: Superadmins see NO tasks from tenant companies.
+            return qs.none()
+
         # Admins see tasks they own, tasks they supervise, or tasks 
         # belonging to users they originally created.
         return qs.filter(
@@ -111,6 +127,10 @@ class TaskAdmin(admin.ModelAdmin):
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         """Restricts selection to only users within the admin's 'visibility' bubble."""
+        if request.user.is_superuser:
+            kwargs["queryset"] = User.objects.none() # Prevent superadmin from assigning company tasks
+            return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
         if db_field.name in ["owner", "supervisor"]:
             kwargs["queryset"] = User.objects.filter(
                 Q(id=request.user.id) | 
@@ -131,6 +151,11 @@ class NoteAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
+        
+        if request.user.is_superuser:
+            # STRICT PRIVACY: Superadmins see NO notes from tenant companies.
+            return qs.none()
+
         return qs.filter(
             Q(task__owner=request.user) | Q(task__supervisor=request.user)
         ).distinct()
