@@ -25,8 +25,11 @@ class Subscription(models.Model):
         # 1. Save the subscription state to the database first
         super().save(*args, **kwargs)
 
+        # --- NEW FIX: Automatically link the owner's profile to this company ---
+        from users.models import Profile # Ensure it's imported
+        Profile.objects.filter(user=self.owner).update(tenant=self, role='SUBSCRIBER')
+
         # 2. BULLETPROOF DB SYNC: Bypass Python memory and force a direct database update.
-        # This explicitly removes 'is_staff' and 'is_active', ensuring they CANNOT access the Django Admin.
         User.objects.filter(pk=self.owner_id).update(
             is_active=self.is_active,
             is_staff=self.is_active 
