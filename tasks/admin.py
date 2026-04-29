@@ -20,6 +20,28 @@ class SubscriptionAdmin(admin.ModelAdmin):
 # ==========================================
 
 class CustomUserAdmin(UserAdmin):
+    
+    # --- NEW: ENFORCE MAX USERS LIMIT IN DJANGO ADMIN ---
+    def has_add_permission(self, request):
+        # 1. Check standard Django permissions first
+        can_add = super().has_add_permission(request)
+        if not can_add:
+            return False
+
+        # 2. If the user is a SUBSCRIBER, check their subscription limit
+        try:
+            profile = request.user.profile
+            if profile.role == 'SUBSCRIBER' and profile.tenant:
+                current_user_count = Profile.objects.filter(tenant=profile.tenant).count()
+                
+                # If they hit the limit, return False to block user creation
+                if current_user_count >= profile.tenant.max_users:
+                    return False
+        except Exception:
+            pass
+
+        return True
+    
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         
@@ -79,6 +101,23 @@ class ProfileAdmin(admin.ModelAdmin):
     list_display = ['user', 'role', 'tenant', 'assigned_supervisor', 'created_by']
     readonly_fields = ['created_by']
 
+    # --- NEW: ENFORCE MAX USERS LIMIT IN DJANGO ADMIN ---
+    def has_add_permission(self, request):
+        can_add = super().has_add_permission(request)
+        if not can_add:
+            return False
+
+        try:
+            profile = request.user.profile
+            if profile.role == 'SUBSCRIBER' and profile.tenant:
+                current_user_count = Profile.objects.filter(tenant=profile.tenant).count()
+                if current_user_count >= profile.tenant.max_users:
+                    return False
+        except Exception:
+            pass
+
+        return True
+    
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         
