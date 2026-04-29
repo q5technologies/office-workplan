@@ -60,7 +60,15 @@ class CustomUserAdmin(UserAdmin):
         super().save_model(request, obj, form, change)
 
         if not change: 
-            Profile.objects.filter(user=obj).update(created_by=request.user)
+            # FIX: Auto-assign the tenant so the user doesn't turn invisible!
+            tenant = None
+            if hasattr(request.user, 'profile'):
+                tenant = request.user.profile.tenant
+
+            Profile.objects.filter(user=obj).update(
+                created_by=request.user,
+                tenant=tenant
+            )
 
 admin.site.unregister(User)
 admin.site.register(User, CustomUserAdmin)
@@ -101,6 +109,10 @@ class ProfileAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         if not obj.pk: 
             obj.created_by = request.user
+            # FIX: Auto-assign the tenant if a profile is created manually
+            if not obj.tenant and hasattr(request.user, 'profile'):
+                obj.tenant = request.user.profile.tenant
+                
         super().save_model(request, obj, form, change)
 
 
