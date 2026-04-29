@@ -165,7 +165,7 @@ class TaskAdmin(admin.ModelAdmin):
 
 @admin.register(Note)
 class NoteAdmin(admin.ModelAdmin):
-    list_display = ('task', 'user', 'created_at')
+    list_display = ('task', 'text', 'user', 'created_at')
     readonly_fields = ('created_at',)
 
     def get_queryset(self, request):
