@@ -3,18 +3,18 @@ from rest_framework import generics, permissions, status, viewsets
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied # <--- NEW IMPORT
+from rest_framework.exceptions import PermissionDenied 
 from django.db.models import Q 
-from django.utils import timezone # <--- NEW IMPORT
+from django.utils import timezone 
 from .models import Task, Note
-from users.models import Profile, Subscription # <--- ADDED Subscription
-from .serializers import TaskSerializer, NoteSerializer, ProfileSerializer, ChangePasswordSerializer, TenantUserCreateSerializer # <--- ADDED TenantUserCreateSerializer
+from users.models import Profile, Subscription 
+from .serializers import TaskSerializer, NoteSerializer, ProfileSerializer, ChangePasswordSerializer, TenantUserCreateSerializer
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist
 
 # ==========================================
-# NEW: SUBSCRIPTION SECURITY MIXIN
+# SUBSCRIPTION SECURITY MIXIN
 # ==========================================
 class IsActiveSubscriberMixin:
     """Ensures the user's tenant account is active and not expired"""
@@ -34,13 +34,13 @@ class IsActiveSubscriberMixin:
         
         # Check Expiry
         if not tenant.is_active or (tenant.expiry_date and timezone.now() > tenant.expiry_date):
-            if tenant.is_active:  # Auto-deactivate if past date
+            if tenant.is_active:  
                 tenant.is_active = False
                 tenant.save()
             raise PermissionDenied("Subscription expired or deactivated. Please renew.")
 
 # ==========================================
-# NEW: SUBSCRIBER USER CREATION VIEW
+# SUBSCRIBER USER CREATION VIEW
 # ==========================================
 class SubscriberCreateUserView(IsActiveSubscriberMixin, generics.CreateAPIView):
     """Allows a SUBSCRIBER to create users (HEAD, SUP, SUB) up to their limit"""
@@ -53,7 +53,6 @@ class SubscriberCreateUserView(IsActiveSubscriberMixin, generics.CreateAPIView):
 
         tenant = request.user.profile.tenant
         
-        # Enforce Max User Limits
         current_users = Profile.objects.filter(tenant=tenant).count()
         if current_users >= tenant.max_users:
             return Response(
@@ -65,19 +64,31 @@ class SubscriberCreateUserView(IsActiveSubscriberMixin, generics.CreateAPIView):
 
 
 # ==========================================
-# ORIGINAL VIEWS (UPDATED WITH TENANT ISOLATION)
+# ORIGINAL VIEWS (UPDATED FOR TENANT ISOLATION)
 # ==========================================
 
-# 1. Your original Generic Views (Maintained & Secured)
 class TaskListCreateView(IsActiveSubscriberMixin, generics.ListCreateAPIView):
     serializer_class = TaskSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         user = self.request.user
+        role = user.profile.role
         tenant = user.profile.tenant
-        # Ensure they only pull tasks from their specific tenant
-        return Task.objects.filter(owner__profile__tenant=tenant).filter(Q(owner=user) | Q(supervisor=user)).distinct()
+        
+        # FIX: HEAD and SUBSCRIBER see ALL tasks in the tenant
+        if role in ['HEAD', 'SUBSCRIBER']:
+            return Task.objects.filter(owner__profile__tenant=tenant).order_by('-created_at')
+        
+        elif role == 'SUP':
+            subordinate_ids = Profile.objects.filter(assigned_supervisor=user, tenant=tenant).values_list('user_id', flat=True)
+            return Task.objects.filter(
+                Q(owner__profile__tenant=tenant) & 
+                (Q(supervisor=user) | Q(owner=user) | Q(owner_id__in=subordinate_ids))
+            ).distinct().order_by('-created_at')
+        
+        else:
+            return Task.objects.filter(owner=user, owner__profile__tenant=tenant).order_by('-created_at')
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
@@ -88,8 +99,20 @@ class TaskRetrieveUpdateDestroyView(IsActiveSubscriberMixin, generics.RetrieveUp
 
     def get_queryset(self):
         user = self.request.user
+        role = user.profile.role
         tenant = user.profile.tenant
-        return Task.objects.filter(owner__profile__tenant=tenant).filter(models.Q(owner=user) | models.Q(supervisor=user)).distinct()
+        
+        # FIX: HEAD and SUBSCRIBER see ALL tasks in the tenant
+        if role in ['HEAD', 'SUBSCRIBER']:
+            return Task.objects.filter(owner__profile__tenant=tenant)
+        elif role == 'SUP':
+            subordinate_ids = Profile.objects.filter(assigned_supervisor=user, tenant=tenant).values_list('user_id', flat=True)
+            return Task.objects.filter(
+                Q(owner__profile__tenant=tenant) & 
+                (Q(supervisor=user) | Q(owner=user) | Q(owner_id__in=subordinate_ids))
+            ).distinct()
+        else:
+            return Task.objects.filter(owner=user, owner__profile__tenant=tenant)
 
 class NoteCreateView(IsActiveSubscriberMixin, generics.CreateAPIView):
     queryset = Note.objects.all()
@@ -99,7 +122,6 @@ class NoteCreateView(IsActiveSubscriberMixin, generics.CreateAPIView):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
-# 2. Your TaskViewSet with the NEW add_note action
 class TaskViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
     serializer_class = TaskSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -107,20 +129,16 @@ class TaskViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         role = user.profile.role
-        tenant = user.profile.tenant # <--- ISOLATION
+        tenant = user.profile.tenant 
 
-        # The SUBSCRIBER and HEAD should only see tasks belonging to THEIR company
         if role in ['HEAD', 'SUBSCRIBER']:
             return Task.objects.filter(owner__profile__tenant=tenant).order_by('-created_at')
-        
         elif role == 'SUP':
             subordinate_ids = Profile.objects.filter(assigned_supervisor=user, tenant=tenant).values_list('user_id', flat=True)
-            
             return Task.objects.filter(
-                Q(owner__profile__tenant=tenant) & # <--- ISOLATION
+                Q(owner__profile__tenant=tenant) & 
                 (Q(supervisor=user) | Q(owner=user) | Q(owner_id__in=subordinate_ids))
             ).distinct().order_by('-created_at')
-        
         elif role == 'SUB':
             return Task.objects.filter(owner=user, owner__profile__tenant=tenant).order_by('-created_at')
             
@@ -133,15 +151,12 @@ class TaskViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         if role == 'SUB':
             assigned_sup = user.profile.assigned_supervisor
             serializer.save(owner=user, supervisor=assigned_sup)
-        
         elif role in ['HEAD', 'SUBSCRIBER']:
             assigned_sup_user = serializer.validated_data.get('supervisor')
-
             if assigned_sup_user:
                 serializer.save(owner=assigned_sup_user, supervisor=user)
             else:
                 serializer.save(owner=user, supervisor=None)
-
         else:
             serializer.save(owner=user)
 
@@ -159,7 +174,6 @@ class TaskViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def supervisors(self, request):
         tenant = request.user.profile.tenant
-        # <--- ISOLATION: Only fetch SUPs from the same company
         sups = User.objects.filter(profile__role='SUP', profile__tenant=tenant)
         data = [{"id": u.id, "username": u.username} for u in sups]
         return Response(data)
@@ -180,7 +194,6 @@ class TaskViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
 
         try:
             tenant = request.user.profile.tenant
-            # Ensure the assigned supervisor is in the same tenant
             supervisor = User.objects.get(id=sup_id, profile__role='SUP', profile__tenant=tenant)
             task.supervisor = supervisor
             task.save()
@@ -195,7 +208,6 @@ class TaskViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         tenant = user.profile.tenant
         
         if role in ['HEAD', 'SUBSCRIBER']:
-            # <--- ISOLATION: Only fetch SUBs from the same company
             subs = User.objects.filter(profile__role='SUB', profile__tenant=tenant)
         elif role == 'SUP':
             subs = User.objects.filter(profile__role='SUB', profile__assigned_supervisor=user, profile__tenant=tenant)
@@ -242,11 +254,9 @@ class TaskViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         task = self.get_object()
 
         if role == 'HEAD' and task.supervisor is not None:
-            from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied("This task is locked under Supervisor management.")
 
         if role == 'SUP' and not (task.supervisor == user or task.owner == user):
-            from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied("You do not have permission to edit this task.")
 
         serializer.save()
@@ -299,7 +309,6 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             
             user.set_password(serializer.data.get('new_password'))
             user.save()
-            
             return Response({"message": "Password updated successfully!"}, status=status.HTTP_200_OK)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -322,17 +331,13 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
 
         try:
             tenant = requesting_user_profile.tenant
-            
-            # ISOLATION: Ensure the SUB and SUP being linked actually belong to the HEAD's company
             sub_profile = Profile.objects.get(user_id=sub_id, role='SUB', tenant=tenant)
             sup_user = User.objects.get(id=sup_id, profile__role='SUP', profile__tenant=tenant)
             
             sub_profile.assigned_supervisor = sup_user
             sub_profile.save()
             
-            return Response({
-                "message": f"Success: {sub_profile.user.username} now reports to {sup_user.username}"
-            })
+            return Response({\"message\": f"Success: {sub_profile.user.username} now reports to {sup_user.username}"})
 
         except Profile.DoesNotExist:
             return Response({"error": "Subordinate profile not found in your organization."}, status=404)
