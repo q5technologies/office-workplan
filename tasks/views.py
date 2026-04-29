@@ -337,7 +337,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             sub_profile.assigned_supervisor = sup_user
             sub_profile.save()
             
-            return Response({\"message\": f"Success: {sub_profile.user.username} now reports to {sup_user.username}"})
+            return Response({"message": f"Success: {sub_profile.user.username} now reports to {sup_user.username}"})
 
         except Profile.DoesNotExist:
             return Response({"error": "Subordinate profile not found in your organization."}, status=404)
