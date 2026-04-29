@@ -24,9 +24,13 @@ class CustomUserAdmin(UserAdmin):
         qs = super().get_queryset(request)
         
         if request.user.is_superuser:
+            # BULLETPROOF SAAS PRIVACY: Superadmins ONLY see:
+            # 1. Themselves
+            # 2. SUBSCRIBERs (The company account owners)
+            # 3. New accounts that haven't been assigned to a company yet.
+            # They will NEVER see a HEAD, SUP, or SUB that belongs to a company.
             return qs.filter(
                 Q(id=request.user.id) | 
-                Q(is_staff=True) | Q(is_superuser=True) |
                 Q(profile__role='SUBSCRIBER') |
                 Q(profile__tenant__isnull=True)
             ).distinct()
@@ -61,6 +65,7 @@ class CustomUserAdmin(UserAdmin):
 admin.site.unregister(User)
 admin.site.register(User, CustomUserAdmin)
 
+
 @admin.register(Profile)
 class ProfileAdmin(admin.ModelAdmin):
     list_display = ['user', 'role', 'tenant', 'assigned_supervisor', 'created_by']
@@ -70,10 +75,11 @@ class ProfileAdmin(admin.ModelAdmin):
         qs = super().get_queryset(request)
         
         if request.user.is_superuser:
+            # Mirrors the strict bulletproof privacy applied to the User Admin
             return qs.filter(
                 Q(user=request.user) | 
-                Q(user__is_staff=True) | Q(user__is_superuser=True) |
-                Q(role='SUBSCRIBER')
+                Q(role='SUBSCRIBER') |
+                Q(tenant__isnull=True)
             ).distinct()
 
         # FIX: HEAD and SUBSCRIBER see ALL profiles in their tenant
@@ -116,6 +122,7 @@ class TaskAdmin(admin.ModelAdmin):
         qs = super().get_queryset(request)
         
         if request.user.is_superuser:
+            # STRICT PRIVACY: Superadmins see NO tasks from tenant companies.
             return qs.none()
 
         # FIX: HEAD and SUBSCRIBER see ALL tasks in their tenant
@@ -163,6 +170,7 @@ class TaskAdmin(admin.ModelAdmin):
             obj.owner = request.user
         super().save_model(request, obj, form, change)
 
+
 @admin.register(Note)
 class NoteAdmin(admin.ModelAdmin):
     list_display = ('task', 'text', 'user', 'created_at')
@@ -172,6 +180,7 @@ class NoteAdmin(admin.ModelAdmin):
         qs = super().get_queryset(request)
         
         if request.user.is_superuser:
+            # STRICT PRIVACY: Superadmins see NO notes from tenant companies.
             return qs.none()
 
         # FIX: HEAD and SUBSCRIBER see ALL notes in their tenant
