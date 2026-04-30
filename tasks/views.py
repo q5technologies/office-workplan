@@ -12,8 +12,13 @@ from .serializers import TaskSerializer, NoteSerializer, ProfileSerializer, Chan
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist
-import csv
 from django.http import HttpResponse
+
+# --- Native CSV & PDF Imports ---
+import csv
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
 
 # ==========================================
 # SUBSCRIPTION SECURITY MIXIN
@@ -45,7 +50,6 @@ class IsActiveSubscriberMixin:
 # SUBSCRIBER USER CREATION VIEW
 # ==========================================
 class SubscriberCreateUserView(IsActiveSubscriberMixin, generics.CreateAPIView):
-    """Allows a SUBSCRIBER to create users (HEAD, SUP, SUB) up to their limit"""
     serializer_class = TenantUserCreateSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -80,14 +84,12 @@ class TaskListCreateView(IsActiveSubscriberMixin, generics.ListCreateAPIView):
         
         if role in ['HEAD', 'SUBSCRIBER']:
             return Task.objects.filter(owner__profile__tenant=tenant).order_by('-created_at')
-        
         elif role == 'SUP':
             subordinate_ids = Profile.objects.filter(assigned_supervisor=user, tenant=tenant).values_list('user_id', flat=True)
             return Task.objects.filter(
                 Q(owner__profile__tenant=tenant) & 
                 (Q(supervisor=user) | Q(owner=user) | Q(owner_id__in=subordinate_ids))
             ).distinct().order_by('-created_at')
-        
         else:
             return Task.objects.filter(owner=user, owner__profile__tenant=tenant).order_by('-created_at')
 
@@ -298,7 +300,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             )
 
     # ==========================================
-    # ENHANCED: TEAM REPORTING (WITH DATES & CSV EXPORT)
+    # ENHANCED: TEAM REPORTING (WITH CSV & PDF EXPORT)
     # ==========================================
     @action(detail=False, methods=['get'])
     def team_report(self, request):
@@ -313,19 +315,20 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
 
         tenant = profile.tenant
 
-        # Extract Query Parameters
+        # --- NEW: Extract the target_user_id ---
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
-        export_csv = request.query_params.get('export', '').lower() == 'csv'
+        export_format = request.query_params.get('export', '').lower()
+        target_user_id = request.query_params.get('user_id') 
 
-        # Filter tasks by Date Range (if provided)
+        # Filter tasks by Date Range 
         task_queryset = Task.objects.all()
         if start_date:
             task_queryset = task_queryset.filter(created_at__date__gte=start_date)
         if end_date:
             task_queryset = task_queryset.filter(created_at__date__lte=end_date)
 
-        # 1. Gather target workers (NOW INCLUDES THE REQUESTING MANAGER)
+        # --- NEW: Gather target workers with Individual Filtering ---
         if profile.role in ['SUBSCRIBER', 'HEAD']:
             target_users = User.objects.filter(profile__tenant=tenant)
         else: # SUP
@@ -333,6 +336,10 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                 Q(id=user.id) | Q(profile__assigned_supervisor=user), 
                 profile__tenant=tenant
             )
+
+        # Apply the individual user filter if one was selected
+        if target_user_id and target_user_id != 'all':
+            target_users = target_users.filter(id=target_user_id)
 
         target_users = target_users.select_related('profile').prefetch_related(
             Prefetch('my_tasks', queryset=task_queryset), 
@@ -377,8 +384,8 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                 "tasks": task_list
             })
 
-        # 3. Process CSV Export if requested
-        if export_csv:
+        # 3a. Process CSV Export
+        if export_format == 'csv':
             response = HttpResponse(content_type='text/csv')
             response['Content-Disposition'] = f'attachment; filename="workplan_report_{timezone.now().strftime("%Y%m%d")}.csv"'
             
@@ -387,26 +394,62 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             
             for data in report_data:
                 if not data['tasks']:
-                    # If the user has no tasks in this range, still print their name and empty stats
                     writer.writerow([data['username'], data['role'], 0, 0, '0.0', 'N/A', 'No Tasks', 'N/A', ''])
                 else:
                     for task in data['tasks']:
-                        # Flatten the notes array into a single readable string for Excel
                         notes_str = " | ".join([f"[{n['created_at']}] {n['user']}: {n['text']}" for n in task['notes']])
                         writer.writerow([
-                            data['username'], 
-                            data['role'], 
-                            data['total_tasks'], 
-                            data['completed_tasks'], 
-                            data['performance_percentage'], 
-                            task['id'], 
-                            task['title'], 
-                            task['status_display'], 
-                            notes_str
+                            data['username'], data['role'], data['total_tasks'], data['completed_tasks'], 
+                            data['performance_percentage'], task['id'], task['title'], task['status_display'], notes_str
                         ])
             return response
 
-        # Default JSON response
+        # 3b. Process PDF Export
+        elif export_format == 'pdf':
+            response = HttpResponse(content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="workplan_report_{timezone.now().strftime("%Y%m%d")}.pdf"'
+
+            doc = SimpleDocTemplate(response, pagesize=letter)
+            styles = getSampleStyleSheet()
+            elements = []
+
+            # Document Title
+            elements.append(Paragraph("Team Performance Report", styles['Title']))
+            elements.append(Spacer(1, 12))
+
+            if start_date and end_date:
+                elements.append(Paragraph(f"<b>Filter Range:</b> {start_date} to {end_date}", styles['Normal']))
+                elements.append(Spacer(1, 12))
+
+            for data in report_data:
+                # Employee Header
+                elements.append(Paragraph(f"<b>{data['username']}</b> (Role: {data['role']})", styles['Heading2']))
+                elements.append(Paragraph(
+                    f"<b>Work Rate Performance:</b> {data['performance_percentage']}% "
+                    f"<i>({data['completed_tasks']} out of {data['total_tasks']} Tasks Completed)</i>", 
+                    styles['Normal']
+                ))
+                elements.append(Spacer(1, 6))
+
+                # Tasks & Notes
+                if not data['tasks']:
+                    elements.append(Paragraph("<i>No tasks found for this user in the specified period.</i>", styles['Normal']))
+                else:
+                    for task in data['tasks']:
+                        elements.append(Paragraph(f"<b>Task:</b> {task['title']} | <b>Status:</b> {task['status_display']}", styles['Heading4']))
+                        if not task['notes']:
+                            elements.append(Paragraph("<i>  - No notes.</i>", styles['Normal']))
+                        else:
+                            for note in task['notes']:
+                                elements.append(Paragraph(f"  - <b>{note['user']}</b> ({note['created_at']}): {note['text']}", styles['Normal']))
+                        elements.append(Spacer(1, 6))
+
+                elements.append(Spacer(1, 12))
+
+            doc.build(elements)
+            return response
+
+        # Default JSON response (for React Native app)
         return Response(report_data, status=status.HTTP_200_OK)
     
     @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
