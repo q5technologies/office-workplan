@@ -76,7 +76,6 @@ class TaskListCreateView(IsActiveSubscriberMixin, generics.ListCreateAPIView):
         role = user.profile.role
         tenant = user.profile.tenant
         
-        # FIX: HEAD and SUBSCRIBER see ALL tasks in the tenant
         if role in ['HEAD', 'SUBSCRIBER']:
             return Task.objects.filter(owner__profile__tenant=tenant).order_by('-created_at')
         
@@ -102,7 +101,6 @@ class TaskRetrieveUpdateDestroyView(IsActiveSubscriberMixin, generics.RetrieveUp
         role = user.profile.role
         tenant = user.profile.tenant
         
-        # FIX: HEAD and SUBSCRIBER see ALL tasks in the tenant
         if role in ['HEAD', 'SUBSCRIBER']:
             return Task.objects.filter(owner__profile__tenant=tenant)
         elif role == 'SUP':
@@ -296,6 +294,74 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                 {"error": "No profile found for this user. Please create one in the admin panel."}, 
                 status=status.HTTP_404_NOT_FOUND
             )
+
+    # ==========================================
+    # NEW: TEAM REPORTING GENERATOR
+    # ==========================================
+    @action(detail=False, methods=['get'])
+    def team_report(self, request):
+        user = request.user
+        try:
+            profile = user.profile
+        except ObjectDoesNotExist:
+            return Response({"error": "Profile not found."}, status=404)
+
+        if profile.role not in ['SUBSCRIBER', 'HEAD', 'SUP']:
+            return Response({"error": "You do not have permission to generate reports."}, status=403)
+
+        tenant = profile.tenant
+
+        # 1. Gather the correct target workers based on role
+        if profile.role in ['SUBSCRIBER', 'HEAD']:
+            target_users = User.objects.filter(profile__tenant=tenant).exclude(id=user.id)
+        else: # SUP
+            target_users = User.objects.filter(profile__tenant=tenant, profile__assigned_supervisor=user)
+
+        # Optimization: Fetch users, their tasks, and notes all at once to prevent database lag
+        target_users = target_users.select_related('profile').prefetch_related(
+            'my_tasks', 
+            'my_tasks__notes', 
+            'my_tasks__notes__user'
+        )
+
+        report_data = []
+
+        # 2. Calculate statistics and aggregate data for each user
+        for t_user in target_users:
+            user_tasks = t_user.my_tasks.all()
+            total_tasks = len(user_tasks)
+            completed_tasks = sum(1 for t in user_tasks if t.status == 'CP')
+
+            perf_pct = 0
+            if total_tasks > 0:
+                perf_pct = round((completed_tasks / total_tasks) * 100, 1)
+
+            task_list = []
+            for task in user_tasks:
+                task_notes = [{
+                    "user": note.user.username,
+                    "text": note.text,
+                    "created_at": note.created_at.strftime("%d %b %Y, %H:%M")
+                } for note in task.notes.all()]
+
+                task_list.append({
+                    "id": task.id,
+                    "title": task.title,
+                    "status_display": task.get_status_display(),
+                    "notes": task_notes
+                })
+
+            report_data.append({
+                "user_id": t_user.id,
+                "username": t_user.username,
+                "role": t_user.profile.role,
+                "total_tasks": total_tasks,
+                "completed_tasks": completed_tasks,
+                "performance_percentage": perf_pct,
+                "tasks": task_list
+            })
+
+        return Response(report_data, status=status.HTTP_200_OK)
     
     @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
     def change_password(self, request):
