@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied 
-from django.db.models import Q 
+from django.db.models import Q, Prefetch
 from django.utils import timezone 
 from .models import Task, Note
 from users.models import Profile, Subscription 
@@ -12,6 +12,8 @@ from .serializers import TaskSerializer, NoteSerializer, ProfileSerializer, Chan
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist
+import csv
+from django.http import HttpResponse
 
 # ==========================================
 # SUBSCRIPTION SECURITY MIXIN
@@ -296,7 +298,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             )
 
     # ==========================================
-    # NEW: TEAM REPORTING GENERATOR
+    # ENHANCED: TEAM REPORTING (WITH DATES & CSV EXPORT)
     # ==========================================
     @action(detail=False, methods=['get'])
     def team_report(self, request):
@@ -311,22 +313,36 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
 
         tenant = profile.tenant
 
-        # 1. Gather the correct target workers based on role
-        if profile.role in ['SUBSCRIBER', 'HEAD']:
-            target_users = User.objects.filter(profile__tenant=tenant).exclude(id=user.id)
-        else: # SUP
-            target_users = User.objects.filter(profile__tenant=tenant, profile__assigned_supervisor=user)
+        # Extract Query Parameters
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        export_csv = request.query_params.get('export', '').lower() == 'csv'
 
-        # Optimization: Fetch users, their tasks, and notes all at once to prevent database lag
+        # Filter tasks by Date Range (if provided)
+        task_queryset = Task.objects.all()
+        if start_date:
+            task_queryset = task_queryset.filter(created_at__date__gte=start_date)
+        if end_date:
+            task_queryset = task_queryset.filter(created_at__date__lte=end_date)
+
+        # 1. Gather target workers (NOW INCLUDES THE REQUESTING MANAGER)
+        if profile.role in ['SUBSCRIBER', 'HEAD']:
+            target_users = User.objects.filter(profile__tenant=tenant)
+        else: # SUP
+            target_users = User.objects.filter(
+                Q(id=user.id) | Q(profile__assigned_supervisor=user), 
+                profile__tenant=tenant
+            )
+
         target_users = target_users.select_related('profile').prefetch_related(
-            'my_tasks', 
+            Prefetch('my_tasks', queryset=task_queryset), 
             'my_tasks__notes', 
             'my_tasks__notes__user'
-        )
+        ).distinct()
 
         report_data = []
 
-        # 2. Calculate statistics and aggregate data for each user
+        # 2. Calculate statistics
         for t_user in target_users:
             user_tasks = t_user.my_tasks.all()
             total_tasks = len(user_tasks)
@@ -361,6 +377,36 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                 "tasks": task_list
             })
 
+        # 3. Process CSV Export if requested
+        if export_csv:
+            response = HttpResponse(content_type='text/csv')
+            response['Content-Disposition'] = f'attachment; filename="workplan_report_{timezone.now().strftime("%Y%m%d")}.csv"'
+            
+            writer = csv.writer(response)
+            writer.writerow(['Username', 'Role', 'Total Tasks', 'Completed', 'Performance (%)', 'Task ID', 'Task Title', 'Status', 'Notes'])
+            
+            for data in report_data:
+                if not data['tasks']:
+                    # If the user has no tasks in this range, still print their name and empty stats
+                    writer.writerow([data['username'], data['role'], 0, 0, '0.0', 'N/A', 'No Tasks', 'N/A', ''])
+                else:
+                    for task in data['tasks']:
+                        # Flatten the notes array into a single readable string for Excel
+                        notes_str = " | ".join([f"[{n['created_at']}] {n['user']}: {n['text']}" for n in task['notes']])
+                        writer.writerow([
+                            data['username'], 
+                            data['role'], 
+                            data['total_tasks'], 
+                            data['completed_tasks'], 
+                            data['performance_percentage'], 
+                            task['id'], 
+                            task['title'], 
+                            task['status_display'], 
+                            notes_str
+                        ])
+            return response
+
+        # Default JSON response
         return Response(report_data, status=status.HTTP_200_OK)
     
     @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
