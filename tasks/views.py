@@ -253,7 +253,6 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         except ObjectDoesNotExist:
             return Response({"error": "No profile found."}, status=status.HTTP_404_NOT_FOUND)
 
-    # --- NEW: Fetches users for the dropdown menu (includes the manager) ---
     @action(detail=False, methods=['get'])
     def report_targets(self, request):
         user = request.user
@@ -275,7 +274,9 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         data = [{"id": u.id, "username": f"{u.username} ({u.profile.role})"} for u in targets]
         return Response(data)
 
-    # --- ULTIMATE TEAM REPORT (Filters + PDF + CSV + Percentages) ---
+    # ==========================================
+    # ENHANCED: TEAM REPORT (MODIFIED WORK RATE)
+    # ==========================================
     @action(detail=False, methods=['get'])
     def team_report(self, request):
         user = request.user
@@ -323,20 +324,32 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         for t_user in target_users:
             user_tasks = t_user.my_tasks.all()
             total_tasks = len(user_tasks)
-            completed_tasks = sum(1 for t in user_tasks if t.status == 'CP')
+            
+            productive_tasks = 0
+            task_list = []
+            
+            for task in user_tasks:
+                task_notes = [{"user": note.user.username, "text": note.text, "created_at": note.created_at.strftime("%d %b %Y, %H:%M")} for note in task.notes.all()]
+                
+                # --- NEW SCORING SYSTEM ---
+                # Count notes explicitly written by the assigned user (the owner)
+                owner_notes_count = sum(1 for note in task.notes.all() if note.user == t_user)
+                
+                # Task counts as "Productive" if it's completed OR (In Progress AND has 4+ notes from the owner)
+                if task.status == 'CP' or (task.status == 'IP' and owner_notes_count >= 4):
+                    productive_tasks += 1
+
+                task_list.append({"id": task.id, "title": task.title, "status_display": task.get_status_display(), "notes": task_notes})
 
             perf_pct = 0
             if total_tasks > 0:
-                perf_pct = round((completed_tasks / total_tasks) * 100, 1)
+                perf_pct = round((productive_tasks / total_tasks) * 100, 1)
 
-            task_list = []
-            for task in user_tasks:
-                task_notes = [{"user": note.user.username, "text": note.text, "created_at": note.created_at.strftime("%d %b %Y, %H:%M")} for note in task.notes.all()]
-                task_list.append({"id": task.id, "title": task.title, "status_display": task.get_status_display(), "notes": task_notes})
-
+            # Note: We keep the JSON key as "completed_tasks" so the React Native mobile app doesn't break, 
+            # but it is mathematically representing "Productive Tasks" now.
             report_data.append({
                 "username": t_user.username, "role": t_user.profile.role,
-                "total_tasks": total_tasks, "completed_tasks": completed_tasks,
+                "total_tasks": total_tasks, "completed_tasks": productive_tasks,
                 "performance_percentage": perf_pct, "tasks": task_list
             })
 
@@ -345,7 +358,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             response = HttpResponse(content_type='text/csv')
             response['Content-Disposition'] = f'attachment; filename="workplan_report_{timezone.now().strftime("%Y%m%d")}.csv"'
             writer = csv.writer(response)
-            writer.writerow(['Username', 'Role', 'Total Tasks', 'Completed', 'Performance (%)', 'Task ID', 'Task Title', 'Status', 'Notes'])
+            writer.writerow(['Username', 'Role', 'Total Tasks', 'Completed/Active', 'Performance (%)', 'Task ID', 'Task Title', 'Status', 'Notes'])
             for data in report_data:
                 if not data['tasks']:
                     writer.writerow([data['username'], data['role'], 0, 0, '0.0', 'N/A', 'No Tasks in Range', 'N/A', ''])
@@ -374,7 +387,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                 elements.append(Paragraph(f"<b>{data['username']}</b> (Role: {data['role']})", styles['Heading2']))
                 elements.append(Paragraph(
                     f"<b>Work Rate Performance:</b> <font color='{'green' if data['performance_percentage'] >= 50 else 'red'}'>{data['performance_percentage']}%</font> "
-                    f"<i>({data['completed_tasks']} out of {data['total_tasks']} Tasks Completed)</i>", 
+                    f"<i>({data['completed_tasks']} out of {data['total_tasks']} Tasks Completed or Highly Active)</i>", 
                     styles['Normal']
                 ))
                 elements.append(Spacer(1, 6))
@@ -397,5 +410,54 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
 
         return Response(report_data, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
+    def change_password(self, request):
+        serializer = ChangePasswordSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            user = request.user
+            if not user.check_password(serializer.data.get('old_password')):
+                return Response({"old_password": ["Wrong current password."]}, 
+                                status=status.HTTP_400_BAD_REQUEST)
+            
+            user.set_password(serializer.data.get('new_password'))
+            user.save()
+            return Response({"message": "Password updated successfully!"}, status=status.HTTP_200_OK)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'])
+    def link_subordinate(self, request):
+        try:
+            requesting_user_profile = request.user.profile
+        except (ObjectDoesNotExist, AttributeError):
+            return Response({"error": "Your user account has no profile assigned."}, status=403)
+
+        if requesting_user_profile.role not in ['HEAD', 'SUBSCRIBER']:
+            return Response({"error": "Only HEAD users or Subscribers can set reporting lines"}, status=403)
+
+        sub_id = request.data.get('subordinate_id')
+        sup_id = request.data.get('supervisor_id')
+
+        if not sub_id or not sup_id:
+            return Response({"error": "Both subordinate_id and supervisor_id are required."}, status=400)
+
+        try:
+            tenant = requesting_user_profile.tenant
+            sub_profile = Profile.objects.get(user_id=sub_id, role='SUB', tenant=tenant)
+            sup_user = User.objects.get(id=sup_id, profile__role='SUP', profile__tenant=tenant)
+            
+            sub_profile.assigned_supervisor = sup_user
+            sub_profile.save()
+            
+            return Response({"message": f"Success: {sub_profile.user.username} now reports to {sup_user.username}"})
+
+        except Profile.DoesNotExist:
+            return Response({"error": "Subordinate profile not found in your organization."}, status=404)
+        except User.DoesNotExist:
+            return Response({"error": "Supervisor not found in your organization."}, status=404)
+        except Exception as e:
+            return Response({"error": f"An unexpected error occurred: {str(e)}"}, status=500)
+        
 def index_view(request):
     return render(request, 'index.html')
