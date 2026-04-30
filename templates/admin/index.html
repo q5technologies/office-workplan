@@ -1,0 +1,43 @@
+{% extends "admin/index.html" %}
+
+{% block content %}
+<!-- Our Custom Report Card injected at the top of the page -->
+<div style="background-color: #ffffff; padding: 25px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 30px; border: 1px solid #e2e8f0; max-width: 800px;">
+    <h2 style="margin: 0 0 10px 0; color: #1e293b; font-size: 20px;">📊 Team Performance Report</h2>
+    <p style="color: #64748b; margin: 0 0 20px 0; font-size: 14px;">Select a date range to export task history and completion rates for your reporting line.</p>
+
+    <form id="reportForm" style="display: flex; gap: 15px; align-items: flex-end;">
+        <div style="flex: 1;">
+            <label for="start_date" style="display: block; font-size: 13px; font-weight: bold; color: #475569; margin-bottom: 5px;">Start Date</label>
+            <input type="date" id="start_date" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box;">
+        </div>
+
+        <div style="flex: 1;">
+            <label for="end_date" style="display: block; font-size: 13px; font-weight: bold; color: #475569; margin-bottom: 5px;">End Date</label>
+            <input type="date" id="end_date" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box;">
+        </div>
+
+        <button type="button" onclick="downloadReport()" style="background-color: #16a34a; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; height: 42px; transition: background 0.2s;">
+            Download CSV Report
+        </button>
+    </form>
+</div>
+
+<script>
+    function downloadReport() {
+        const startDate = document.getElementById('start_date').value;
+        const endDate = document.getElementById('end_date').value;
+        
+        // Build the URL to hit the API endpoint
+        let url = '/api/profiles/team_report/?export=csv';
+        if (startDate) url += `&start_date=${startDate}`;
+        if (endDate) url += `&end_date=${endDate}`;
+        
+        // Trigger the automatic file download
+        window.location.href = url;
+    }
+</script>
+
+<!-- The block.super tag tells Django to load all the normal Admin stuff (Tasks, Notes, Users) directly beneath our custom card! -->
+{{ block.super }}
+{% endblock %}
