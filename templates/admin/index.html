@@ -8,9 +8,9 @@
     <form id="reportForm" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
         
         <!-- Dropdown to select "All" or a specific User -->
-        <div style="flex: 1; min-width: 130px;">
+        <div style="flex: 1; min-width: 200px;">
             <label for="target_user" style="display: block; font-size: 13px; font-weight: bold; color: #475569; margin-bottom: 5px;">Report Target</label>
-            <select id="target_user" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; background-color: white;">
+            <select id="target_user" style="width: 100%; height: 42px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; background-color: white;">
                 <option value="all">Entire Team & Myself</option>
                 <!-- JavaScript populates individual names here -->
             </select>
@@ -18,12 +18,12 @@
 
         <div style="flex: 1; min-width: 130px;">
             <label for="start_date" style="display: block; font-size: 13px; font-weight: bold; color: #475569; margin-bottom: 5px;">Start Date</label>
-            <input type="date" id="start_date" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box;">
+            <input type="date" id="start_date" style="width: 100%; height: 42px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box;">
         </div>
 
         <div style="flex: 1; min-width: 130px;">
             <label for="end_date" style="display: block; font-size: 13px; font-weight: bold; color: #475569; margin-bottom: 5px;">End Date</label>
-            <input type="date" id="end_date" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box;">
+            <input type="date" id="end_date" style="width: 100%; height: 42px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box;">
         </div>
 
         <button type="button" onclick="downloadReport('csv')" style="background-color: #16a34a; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; height: 42px; transition: background 0.2s;">
