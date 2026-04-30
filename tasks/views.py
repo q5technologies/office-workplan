@@ -27,19 +27,14 @@ class IsActiveSubscriberMixin:
     """Ensures the user's tenant account is active and not expired"""
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
-        
-        if not request.user.is_authenticated:
-            return
-
+        if not request.user.is_authenticated: return
         try:
             tenant = request.user.profile.tenant
         except ObjectDoesNotExist:
             raise PermissionDenied("User profile not found.")
-
         if not tenant:
             raise PermissionDenied("You do not belong to an active subscription/tenant.")
         
-        # Check Expiry
         if not tenant.is_active or (tenant.expiry_date and timezone.now() > tenant.expiry_date):
             if tenant.is_active:  
                 tenant.is_active = False
@@ -56,23 +51,16 @@ class SubscriberCreateUserView(IsActiveSubscriberMixin, generics.CreateAPIView):
     def create(self, request, *args, **kwargs):
         if request.user.profile.role != 'SUBSCRIBER':
             return Response({"error": "Only subscribers can create users."}, status=status.HTTP_403_FORBIDDEN)
-
         tenant = request.user.profile.tenant
-        
         current_users = Profile.objects.filter(tenant=tenant).count()
         if current_users >= tenant.max_users:
-            return Response(
-                {"error": f"Subscription limit reached ({tenant.max_users} users). Please upgrade your plan."}, 
-                status=status.HTTP_403_FORBIDDEN
-            )
-
+            return Response({"error": f"Subscription limit reached ({tenant.max_users} users)."}, status=status.HTTP_403_FORBIDDEN)
         return super().create(request, *args, **kwargs)
 
 
 # ==========================================
 # ORIGINAL VIEWS (UPDATED FOR TENANT ISOLATION)
 # ==========================================
-
 class TaskListCreateView(IsActiveSubscriberMixin, generics.ListCreateAPIView):
     serializer_class = TaskSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -120,7 +108,6 @@ class NoteCreateView(IsActiveSubscriberMixin, generics.CreateAPIView):
     queryset = Note.objects.all()
     serializer_class = NoteSerializer
     permission_classes = [permissions.IsAuthenticated]
-
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
@@ -143,13 +130,11 @@ class TaskViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             ).distinct().order_by('-created_at')
         elif role == 'SUB':
             return Task.objects.filter(owner=user, owner__profile__tenant=tenant).order_by('-created_at')
-            
         return Task.objects.none()
 
     def perform_create(self, serializer):
         user = self.request.user
         role = user.profile.role
-
         if role == 'SUB':
             assigned_sup = user.profile.assigned_supervisor
             serializer.save(owner=user, supervisor=assigned_sup)
@@ -166,11 +151,9 @@ class TaskViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
     def add_note(self, request, pk=None):
         task = self.get_object()
         serializer = NoteSerializer(data=request.data)
-        
         if serializer.is_valid():
             serializer.save(user=request.user, task=task)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
-        
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     @action(detail=False, methods=['get'])
@@ -184,16 +167,11 @@ class TaskViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
     def assign_supervisor(self, request, pk=None):
         if request.user.profile.role not in ['HEAD', 'SUBSCRIBER']:
             return Response({"detail": "Only the Head or Subscriber can assign supervisors."}, status=403)
-        
         task = self.get_object()
-
         if task.supervisor is not None:
             return Response({"detail": "This task is already under Supervisor management."}, status=403)
-        
         sup_id = request.data.get('supervisor_id')
-        if not sup_id:
-            return Response({"detail": "Supervisor ID is required."}, status=400)
-
+        if not sup_id: return Response({"detail": "Supervisor ID is required."}, status=400)
         try:
             tenant = request.user.profile.tenant
             supervisor = User.objects.get(id=sup_id, profile__role='SUP', profile__tenant=tenant)
@@ -208,14 +186,12 @@ class TaskViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         user = request.user
         role = user.profile.role
         tenant = user.profile.tenant
-        
         if role in ['HEAD', 'SUBSCRIBER']:
             subs = User.objects.filter(profile__role='SUB', profile__tenant=tenant)
         elif role == 'SUP':
             subs = User.objects.filter(profile__role='SUB', profile__assigned_supervisor=user, profile__tenant=tenant)
         else:
             return Response([])
-
         data = [{"id": u.id, "username": u.username} for u in subs]
         return Response(data)
 
@@ -224,64 +200,46 @@ class TaskViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         task = self.get_object()
         user = request.user
         role = user.profile.role
-
         if role == 'HEAD' and task.supervisor is not None:
             return Response({"detail": "Only the assigned Supervisor can reassign this task."}, status=403)
-
         is_head = (role == 'HEAD' or role == 'SUBSCRIBER')
         is_assigned_sup = (task.supervisor == user)
         is_owner = (task.owner == user)
-
         if not (is_head or is_assigned_sup or is_owner):
             return Response({"detail": "Permission denied."}, status=403)
-
         subordinate_id = request.data.get('subordinate_id')
-        if not subordinate_id:
-            return Response({"detail": "Subordinate ID is required."}, status=400)
-
+        if not subordinate_id: return Response({"detail": "Subordinate ID is required."}, status=400)
         try:
             tenant = request.user.profile.tenant
             subordinate = User.objects.get(id=subordinate_id, profile__tenant=tenant)
             task.owner = subordinate
-            if role == 'SUP':
-                task.supervisor = user
+            if role == 'SUP': task.supervisor = user
             task.save()
             return Response({'status': 'Task reassigned'})
         except User.DoesNotExist:
-            return Response({"detail": "Subordinate not found in your organization."}, status=404)
+            return Response({"detail": "Subordinate not found."}, status=404)
         
     def perform_update(self, serializer):
         user = self.request.user
         role = user.profile.role
         task = self.get_object()
-
         if role == 'HEAD' and task.supervisor is not None:
             raise PermissionDenied("This task is locked under Supervisor management.")
-
         if role == 'SUP' and not (task.supervisor == user or task.owner == user):
             raise PermissionDenied("You do not have permission to edit this task.")
-
         serializer.save()
 
     def partial_update(self, request, *args, **kwargs):
         user = request.user
         task = self.get_object()
         role = user.profile.role
-        
         if role == 'HEAD' and task.supervisor is not None:
-            return Response(
-                {"error": "Task is locked. Only the assigned Supervisor can make changes."},
-                status=status.HTTP_403_FORBIDDEN
-            )
-            
+            return Response({"error": "Task is locked."}, status=status.HTTP_403_FORBIDDEN)
         if role == 'SUP' and not (task.supervisor == user or task.owner == user):
-             return Response(
-                {"detail": "You do not have permission to edit this task."}, 
-                status=status.HTTP_403_FORBIDDEN
-            )
-            
+             return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
         return super().partial_update(request, *args, **kwargs)
                 
+
 class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
     queryset = Profile.objects.all()
     serializer_class = ProfileSerializer
@@ -291,17 +249,33 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
     def me(self, request):
         try:
             profile = request.user.profile
-            serializer = self.get_serializer(profile)
-            return Response(serializer.data)
-        except (ObjectDoesNotExist, AttributeError):
-            return Response(
-                {"error": "No profile found for this user. Please create one in the admin panel."}, 
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response(self.get_serializer(profile).data)
+        except ObjectDoesNotExist:
+            return Response({"error": "No profile found."}, status=status.HTTP_404_NOT_FOUND)
 
-    # ==========================================
-    # ENHANCED: TEAM REPORTING (WITH CSV & PDF EXPORT)
-    # ==========================================
+    # --- NEW: Fetches users for the dropdown menu (includes the manager) ---
+    @action(detail=False, methods=['get'])
+    def report_targets(self, request):
+        user = request.user
+        try:
+            tenant = user.profile.tenant
+        except ObjectDoesNotExist:
+            return Response([])
+
+        if user.profile.role in ['SUBSCRIBER', 'HEAD']:
+            targets = User.objects.filter(profile__tenant=tenant)
+        elif user.profile.role == 'SUP':
+            targets = User.objects.filter(
+                Q(id=user.id) | Q(profile__assigned_supervisor=user), 
+                profile__tenant=tenant
+            )
+        else:
+            return Response([])
+
+        data = [{"id": u.id, "username": f"{u.username} ({u.profile.role})"} for u in targets]
+        return Response(data)
+
+    # --- ULTIMATE TEAM REPORT (Filters + PDF + CSV + Percentages) ---
     @action(detail=False, methods=['get'])
     def team_report(self, request):
         user = request.user
@@ -311,33 +285,30 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             return Response({"error": "Profile not found."}, status=404)
 
         if profile.role not in ['SUBSCRIBER', 'HEAD', 'SUP']:
-            return Response({"error": "You do not have permission to generate reports."}, status=403)
+            return Response({"error": "Permission denied."}, status=403)
 
         tenant = profile.tenant
 
-        # --- NEW: Extract the target_user_id ---
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
         export_format = request.query_params.get('export', '').lower()
         target_user_id = request.query_params.get('user_id') 
 
-        # Filter tasks by Date Range 
+        # Filter tasks by Date Range
         task_queryset = Task.objects.all()
-        if start_date:
-            task_queryset = task_queryset.filter(created_at__date__gte=start_date)
-        if end_date:
-            task_queryset = task_queryset.filter(created_at__date__lte=end_date)
+        if start_date: task_queryset = task_queryset.filter(created_at__date__gte=start_date)
+        if end_date: task_queryset = task_queryset.filter(created_at__date__lte=end_date)
 
-        # --- NEW: Gather target workers with Individual Filtering ---
+        # Gather targets
         if profile.role in ['SUBSCRIBER', 'HEAD']:
             target_users = User.objects.filter(profile__tenant=tenant)
-        else: # SUP
+        else: 
             target_users = User.objects.filter(
                 Q(id=user.id) | Q(profile__assigned_supervisor=user), 
                 profile__tenant=tenant
             )
 
-        # Apply the individual user filter if one was selected
+        # Filter by individual dropdown selection
         if target_user_id and target_user_id != 'all':
             target_users = target_users.filter(id=target_user_id)
 
@@ -349,7 +320,6 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
 
         report_data = []
 
-        # 2. Calculate statistics
         for t_user in target_users:
             user_tasks = t_user.my_tasks.all()
             total_tasks = len(user_tasks)
@@ -361,77 +331,54 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
 
             task_list = []
             for task in user_tasks:
-                task_notes = [{
-                    "user": note.user.username,
-                    "text": note.text,
-                    "created_at": note.created_at.strftime("%d %b %Y, %H:%M")
-                } for note in task.notes.all()]
-
-                task_list.append({
-                    "id": task.id,
-                    "title": task.title,
-                    "status_display": task.get_status_display(),
-                    "notes": task_notes
-                })
+                task_notes = [{"user": note.user.username, "text": note.text, "created_at": note.created_at.strftime("%d %b %Y, %H:%M")} for note in task.notes.all()]
+                task_list.append({"id": task.id, "title": task.title, "status_display": task.get_status_display(), "notes": task_notes})
 
             report_data.append({
-                "user_id": t_user.id,
-                "username": t_user.username,
-                "role": t_user.profile.role,
-                "total_tasks": total_tasks,
-                "completed_tasks": completed_tasks,
-                "performance_percentage": perf_pct,
-                "tasks": task_list
+                "username": t_user.username, "role": t_user.profile.role,
+                "total_tasks": total_tasks, "completed_tasks": completed_tasks,
+                "performance_percentage": perf_pct, "tasks": task_list
             })
 
-        # 3a. Process CSV Export
+        # --- EXPORT TO CSV ---
         if export_format == 'csv':
             response = HttpResponse(content_type='text/csv')
             response['Content-Disposition'] = f'attachment; filename="workplan_report_{timezone.now().strftime("%Y%m%d")}.csv"'
-            
             writer = csv.writer(response)
             writer.writerow(['Username', 'Role', 'Total Tasks', 'Completed', 'Performance (%)', 'Task ID', 'Task Title', 'Status', 'Notes'])
-            
             for data in report_data:
                 if not data['tasks']:
-                    writer.writerow([data['username'], data['role'], 0, 0, '0.0', 'N/A', 'No Tasks', 'N/A', ''])
+                    writer.writerow([data['username'], data['role'], 0, 0, '0.0', 'N/A', 'No Tasks in Range', 'N/A', ''])
                 else:
                     for task in data['tasks']:
                         notes_str = " | ".join([f"[{n['created_at']}] {n['user']}: {n['text']}" for n in task['notes']])
-                        writer.writerow([
-                            data['username'], data['role'], data['total_tasks'], data['completed_tasks'], 
-                            data['performance_percentage'], task['id'], task['title'], task['status_display'], notes_str
-                        ])
+                        writer.writerow([data['username'], data['role'], data['total_tasks'], data['completed_tasks'], data['performance_percentage'], task['id'], task['title'], task['status_display'], notes_str])
             return response
 
-        # 3b. Process PDF Export
+        # --- EXPORT TO PDF ---
         elif export_format == 'pdf':
             response = HttpResponse(content_type='application/pdf')
             response['Content-Disposition'] = f'attachment; filename="workplan_report_{timezone.now().strftime("%Y%m%d")}.pdf"'
-
             doc = SimpleDocTemplate(response, pagesize=letter)
             styles = getSampleStyleSheet()
             elements = []
 
-            # Document Title
             elements.append(Paragraph("Team Performance Report", styles['Title']))
             elements.append(Spacer(1, 12))
 
             if start_date and end_date:
-                elements.append(Paragraph(f"<b>Filter Range:</b> {start_date} to {end_date}", styles['Normal']))
+                elements.append(Paragraph(f"<b>Date Range:</b> {start_date} to {end_date}", styles['Normal']))
                 elements.append(Spacer(1, 12))
 
             for data in report_data:
-                # Employee Header
                 elements.append(Paragraph(f"<b>{data['username']}</b> (Role: {data['role']})", styles['Heading2']))
                 elements.append(Paragraph(
-                    f"<b>Work Rate Performance:</b> {data['performance_percentage']}% "
+                    f"<b>Work Rate Performance:</b> <font color='{'green' if data['performance_percentage'] >= 50 else 'red'}'>{data['performance_percentage']}%</font> "
                     f"<i>({data['completed_tasks']} out of {data['total_tasks']} Tasks Completed)</i>", 
                     styles['Normal']
                 ))
                 elements.append(Spacer(1, 6))
 
-                # Tasks & Notes
                 if not data['tasks']:
                     elements.append(Paragraph("<i>No tasks found for this user in the specified period.</i>", styles['Normal']))
                 else:
@@ -443,63 +390,12 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                             for note in task['notes']:
                                 elements.append(Paragraph(f"  - <b>{note['user']}</b> ({note['created_at']}): {note['text']}", styles['Normal']))
                         elements.append(Spacer(1, 6))
-
                 elements.append(Spacer(1, 12))
 
             doc.build(elements)
             return response
 
-        # Default JSON response (for React Native app)
         return Response(report_data, status=status.HTTP_200_OK)
-    
-    @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
-    def change_password(self, request):
-        serializer = ChangePasswordSerializer(data=request.data)
-        
-        if serializer.is_valid():
-            user = request.user
-            if not user.check_password(serializer.data.get('old_password')):
-                return Response({"old_password": ["Wrong current password."]}, 
-                                status=status.HTTP_400_BAD_REQUEST)
-            
-            user.set_password(serializer.data.get('new_password'))
-            user.save()
-            return Response({"message": "Password updated successfully!"}, status=status.HTTP_200_OK)
-        
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=False, methods=['post'])
-    def link_subordinate(self, request):
-        try:
-            requesting_user_profile = request.user.profile
-        except (ObjectDoesNotExist, AttributeError):
-            return Response({"error": "Your user account has no profile assigned."}, status=403)
-
-        if requesting_user_profile.role not in ['HEAD', 'SUBSCRIBER']:
-            return Response({"error": "Only HEAD users or Subscribers can set reporting lines"}, status=403)
-
-        sub_id = request.data.get('subordinate_id')
-        sup_id = request.data.get('supervisor_id')
-
-        if not sub_id or not sup_id:
-            return Response({"error": "Both subordinate_id and supervisor_id are required."}, status=400)
-
-        try:
-            tenant = requesting_user_profile.tenant
-            sub_profile = Profile.objects.get(user_id=sub_id, role='SUB', tenant=tenant)
-            sup_user = User.objects.get(id=sup_id, profile__role='SUP', profile__tenant=tenant)
-            
-            sub_profile.assigned_supervisor = sup_user
-            sub_profile.save()
-            
-            return Response({"message": f"Success: {sub_profile.user.username} now reports to {sup_user.username}"})
-
-        except Profile.DoesNotExist:
-            return Response({"error": "Subordinate profile not found in your organization."}, status=404)
-        except User.DoesNotExist:
-            return Response({"error": "Supervisor not found in your organization."}, status=404)
-        except Exception as e:
-            return Response({"error": f"An unexpected error occurred: {str(e)}"}, status=500)
-        
 def index_view(request):
     return render(request, 'index.html')
