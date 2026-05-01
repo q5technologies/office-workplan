@@ -227,6 +227,13 @@ class NoteAdmin(admin.ModelAdmin):
     list_display = ('task', 'text', 'user', 'created_at')
     readonly_fields = ('created_at',)
 
+    # --- NEW: ADMIN PANEL FILTERS ---
+    list_filter = (
+        ('user', admin.RelatedOnlyFieldListFilter), # Filters by individual (maintains privacy!)
+        'created_at',                               # Side-bar date filter
+    )
+    date_hierarchy = 'created_at' # Top-bar date/month drill-down
+
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         
