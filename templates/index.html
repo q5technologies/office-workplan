@@ -1,75 +1,22 @@
-{% extends "admin/index.html" %}
-
-{% block content %}
-<div style="background-color: #ffffff; padding: 25px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 30px; border: 1px solid #e2e8f0; max-width: 800px;">
-    <h2 style="margin: 0 0 10px 0; color: #1e293b; font-size: 20px;">📊 Team Performance Report</h2>
-    <p style="color: #64748b; margin: 0 0 20px 0; font-size: 14px;">Select parameters to export task history and completion rates.</p>
-
-    <form id="reportForm" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
-        
-        <!-- NEW: Target User Dropdown -->
-        <div style="flex: 1; min-width: 200px;">
-            <label for="target_user" style="display: block; font-size: 13px; font-weight: bold; color: #475569; margin-bottom: 5px;">Report Target</label>
-            <select id="target_user" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; background-color: white;">
-                <option value="all">Entire Team</option>
-                <!-- JavaScript will populate the rest of the team here -->
-            </select>
+{% load pwa %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Supervisor</title>
+    
+    {% progressive_web_app_meta %}
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 flex items-center justify-center h-screen">
+    <div class="text-center p-8 bg-white shadow-xl rounded-2xl">
+        <h1 class="text-2xl font-bold text-gray-800">Task Supervisor App</h1>
+        <p class="text-gray-600 mt-2">Checking for installation availability...</p>
+        <div class="mt-6">
+            <a href="/admin" class="text-blue-500 underline">Go to Admin Panel</a>
         </div>
-
-        <div style="flex: 1; min-width: 130px;">
-            <label for="start_date" style="display: block; font-size: 13px; font-weight: bold; color: #475569; margin-bottom: 5px;">Start Date</label>
-            <input type="date" id="start_date" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box;">
-        </div>
-
-        <div style="flex: 1; min-width: 130px;">
-            <label for="end_date" style="display: block; font-size: 13px; font-weight: bold; color: #475569; margin-bottom: 5px;">End Date</label>
-            <input type="date" id="end_date" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box;">
-        </div>
-
-        <button type="button" onclick="downloadReport('csv')" style="background-color: #16a34a; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; height: 42px; transition: background 0.2s;">
-            CSV
-        </button>
-        
-        <button type="button" onclick="downloadReport('pdf')" style="background-color: #e11d48; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; height: 42px; transition: background 0.2s;">
-            PDF
-        </button>
-    </form>
-</div>
-
-<script>
-    // 1. Fetch the team list as soon as the page loads
-    document.addEventListener("DOMContentLoaded", function() {
-        const selectBox = document.getElementById('target_user');
-        
-        // We can reuse the endpoints you already built for the mobile app!
-        fetch('/api/tasks/subordinates/')
-            .then(response => response.json())
-            .then(data => {
-                data.forEach(user => {
-                    const option = document.createElement('option');
-                    option.value = user.id;
-                    option.text = user.username;
-                    selectBox.appendChild(option);
-                });
-            })
-            .catch(error => console.error("Error loading team:", error));
-    });
-
-    // 2. Download the report with the new user_id parameter
-    function downloadReport(format) {
-        const targetUser = document.getElementById('target_user').value;
-        const startDate = document.getElementById('start_date').value;
-        const endDate = document.getElementById('end_date').value;
-        
-        let url = `/api/profiles/team_report/?export=${format}`;
-        
-        if (targetUser !== 'all') url += `&user_id=${targetUser}`;
-        if (startDate) url += `&start_date=${startDate}`;
-        if (endDate) url += `&end_date=${endDate}`;
-        
-        window.location.href = url;
-    }
-</script>
-
-{{ block.super }}
-{% endblock %}
+    </div>
+</body>
+</html>
