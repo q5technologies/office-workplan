@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Report Preview</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-4 md:p-8 font-sans text-gray-800 min-h-screen">
+    
+    <div class="max-w-5xl mx-auto bg-white p-6 md:p-10 rounded-2xl shadow-xl border border-gray-200">
+        
+        <!-- Header & Download Buttons -->
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 border-b border-gray-200 pb-6 gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-900">📊 Team Performance Report</h1>
+                <p class="text-gray-500 mt-2 font-medium">
+                    {% if start_date and end_date %}
+                        Date Range: <span class="text-gray-800">{{ start_date }}</span> to <span class="text-gray-800">{{ end_date }}</span>
+                    {% else %}
+                        All-Time Complete History
+                    {% endif %}
+                </p>
+            </div>
+            
+            <div class="flex gap-3">
+                <button onclick="downloadFile('csv')" class="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg font-bold shadow-md transition duration-200">
+                    Download CSV
+                </button>
+                <button onclick="downloadFile('pdf')" class="bg-rose-600 hover:bg-rose-700 text-white px-5 py-2.5 rounded-lg font-bold shadow-md transition duration-200">
+                    Download PDF
+                </button>
+            </div>
+        </div>
+
+        <!-- The Report Data -->
+        {% if not report_data %}
+            <div class="text-center py-10 bg-gray-50 rounded-xl border border-dashed border-gray-300">
+                <p class="text-gray-500 text-lg italic">No records found for this specific criteria.</p>
+            </div>
+        {% else %}
+            <div class="space-y-8">
+                {% for user in report_data %}
+                    <div class="p-6 bg-slate-50 rounded-xl border border-slate-200 shadow-sm">
+                        
+                        <!-- Employee Header -->
+                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
+                            <h2 class="text-2xl font-bold text-slate-800">
+                                👤 {{ user.username }} 
+                                <span class="text-sm font-semibold text-slate-500 bg-slate-200 px-3 py-1 rounded-full ml-2 align-middle">{{ user.role }}</span>
+                            </h2>
+                            <div class="text-left md:text-right mt-3 md:mt-0">
+                                <span class="text-xl font-black {% if user.performance_percentage >= 50 %}text-green-600{% else %}text-rose-600{% endif %} block">
+                                    {{ user.performance_percentage }}% Work Rate
+                                </span>
+                                <p class="text-xs text-slate-500 mt-1 font-medium">(Averaged across {{ user.total_tasks }} active assigned tasks)</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Task List -->
+                        {% if not user.tasks %}
+                            <p class="text-sm text-slate-500 italic px-4 py-3 bg-white rounded border border-slate-200">No active tasks recorded in this period.</p>
+                        {% else %}
+                            <div class="space-y-4">
+                            {% for task in user.tasks %}
+                                <div class="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
+                                    <h3 class="font-bold text-slate-800 text-lg flex items-center">
+                                        {{ task.title }} 
+                                        <span class="text-xs font-bold px-2 py-1 bg-slate-100 text-slate-600 rounded ml-3 border border-slate-200">{{ task.status_display }}</span>
+                                    </h3>
+                                    
+                                    {% if not task.notes %}
+                                        <p class="text-xs text-slate-400 mt-3 italic bg-slate-50 p-2 rounded">No notes attached.</p>
+                                    {% else %}
+                                        <ul class="mt-4 space-y-2 pl-4 border-l-2 border-slate-200">
+                                        {% for note in task.notes %}
+                                            <li class="text-sm text-slate-700">
+                                                <span class="font-bold text-slate-900">{{ note.user }}</span> 
+                                                <span class="text-xs text-slate-400 ml-1">({{ note.created_at }})</span>: 
+                                                <span class="ml-1 text-slate-600">{{ note.text }}</span>
+                                            </li>
+                                        {% endfor %}
+                                        </ul>
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
+                            </div>
+                        {% endif %}
+
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </div>
+    
+    <!-- Script to handle downloads directly from the preview page -->
+    <script>
+        function downloadFile(format) {
+            // Get the current URL and strictly change export=html to export=pdf (or csv)
+            const urlParams = new URLSearchParams(window.location.search);
+            urlParams.set('export', format);
+            window.location.href = window.location.pathname + '?' + urlParams.toString();
+        }
+    </script>
+</body>
+</html>

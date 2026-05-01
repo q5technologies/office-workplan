@@ -452,6 +452,15 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
 
             doc.build(elements)
             return response
+        
+        # --- NEW: EXPORT TO HTML (LIVE PREVIEW PAGE) ---
+        elif export_format == 'html':
+            context = {
+                'report_data': report_data,
+                'start_date': start_date,
+                'end_date': end_date,
+            }
+            return render(request, 'report_preview.html', context)
 
         return Response(report_data, status=status.HTTP_200_OK)
 
