@@ -16,6 +16,7 @@ from django.http import HttpResponse
 
 # --- Native CSV & PDF Imports ---
 import csv
+from datetime import datetime
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
@@ -275,7 +276,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         return Response(data)
 
     # ==========================================
-    # ENHANCED: TEAM REPORT (MODIFIED WORK RATE)
+    # ENHANCED: TEAM REPORT (PROPORTIONAL WORK RATE + CP RULES)
     # ==========================================
     @action(detail=False, methods=['get'])
     def team_report(self, request):
@@ -295,12 +296,16 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         export_format = request.query_params.get('export', '').lower()
         target_user_id = request.query_params.get('user_id') 
 
-        # Filter tasks by Date Range
-        task_queryset = Task.objects.all()
-        if start_date: task_queryset = task_queryset.filter(created_at__date__gte=start_date)
-        if end_date: task_queryset = task_queryset.filter(created_at__date__lte=end_date)
+        start_dt = None
+        end_dt = None
+        try:
+            if start_date: start_dt = datetime.strptime(start_date, '%Y-%m-%d').date()
+            if end_date: end_dt = datetime.strptime(end_date, '%Y-%m-%d').date()
+        except ValueError:
+            pass
 
-        # Gather targets
+        task_queryset = Task.objects.all()
+
         if profile.role in ['SUBSCRIBER', 'HEAD']:
             target_users = User.objects.filter(profile__tenant=tenant)
         else: 
@@ -309,7 +314,6 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                 profile__tenant=tenant
             )
 
-        # Filter by individual dropdown selection
         if target_user_id and target_user_id != 'all':
             target_users = target_users.filter(id=target_user_id)
 
@@ -323,33 +327,72 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
 
         for t_user in target_users:
             user_tasks = t_user.my_tasks.all()
-            total_tasks = len(user_tasks)
             
-            productive_tasks = 0
+            active_tasks = []
+            sum_task_percentages = 0
             task_list = []
             
             for task in user_tasks:
-                task_notes = [{"user": note.user.username, "text": note.text, "created_at": note.created_at.strftime("%d %b %Y, %H:%M")} for note in task.notes.all()]
+                if task.status in ['CN', 'PP']: 
+                    continue
                 
-                # --- NEW SCORING SYSTEM ---
-                # Count notes explicitly written by the assigned user (the owner)
-                owner_notes_count = sum(1 for note in task.notes.all() if note.user == t_user)
+                task_date = task.created_at.date()
+                created_in_period = True
+                if start_dt and task_date < start_dt: created_in_period = False
+                if end_dt and task_date > end_dt: created_in_period = False
                 
-                # Task counts as "Productive" if it's completed OR (In Progress AND has 4+ notes from the owner)
-                if task.status == 'CP' or (task.status == 'IP' and owner_notes_count >= 4):
-                    productive_tasks += 1
+                notes_in_period = 0
+                total_owner_notes = 0 # NEW: Track ALL notes for CP tasks
+                
+                for note in task.notes.all():
+                    if note.user_id == t_user.id:
+                        total_owner_notes += 1
+                        note_date = note.created_at.date()
+                        in_range = True
+                        if start_dt and note_date < start_dt: in_range = False
+                        if end_dt and note_date > end_dt: in_range = False
+                        if in_range: notes_in_period += 1
+                
+                is_active = False
+                if not start_dt and not end_dt:
+                    is_active = True
+                else:
+                    if created_in_period or notes_in_period > 0:
+                        is_active = True
+                    elif task.status in ['IP', 'NS']:
+                        if end_dt and task_date <= end_dt:
+                            is_active = True
+                        elif not end_dt:
+                            is_active = True
+                
+                if is_active:
+                    task_pct = 0
+                    
+                    # --- NEW SCORING RULES APPLIED HERE ---
+                    if task.status == 'CP':
+                        # Completed tasks require 6 TOTAL notes to be fully credited (100%)
+                        task_pct = min((total_owner_notes / 6.0) * 100, 100)
+                    elif task.status == 'IP':
+                        # In-Progress tasks require 4 notes IN THE PERIOD to be fully credited (100%)
+                        task_pct = min((notes_in_period / 4.0) * 100, 100)
+                    
+                    sum_task_percentages += task_pct
+                    active_tasks.append(task)
+                    
+                    task_notes_formatted = [{"user": n.user.username, "text": n.text, "created_at": n.created_at.strftime("%d %b %Y, %H:%M")} for n in task.notes.all()]
+                    task_list.append({
+                        "id": task.id, 
+                        "title": task.title, 
+                        "status_display": task.get_status_display(), 
+                        "notes": task_notes_formatted
+                    })
+            
+            total_active_tasks = len(active_tasks)
+            perf_pct = round(sum_task_percentages / total_active_tasks, 1) if total_active_tasks > 0 else 0
 
-                task_list.append({"id": task.id, "title": task.title, "status_display": task.get_status_display(), "notes": task_notes})
-
-            perf_pct = 0
-            if total_tasks > 0:
-                perf_pct = round((productive_tasks / total_tasks) * 100, 1)
-
-            # Note: We keep the JSON key as "completed_tasks" so the React Native mobile app doesn't break, 
-            # but it is mathematically representing "Productive Tasks" now.
             report_data.append({
                 "username": t_user.username, "role": t_user.profile.role,
-                "total_tasks": total_tasks, "completed_tasks": productive_tasks,
+                "total_tasks": total_active_tasks,
                 "performance_percentage": perf_pct, "tasks": task_list
             })
 
@@ -358,14 +401,14 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             response = HttpResponse(content_type='text/csv')
             response['Content-Disposition'] = f'attachment; filename="workplan_report_{timezone.now().strftime("%Y%m%d")}.csv"'
             writer = csv.writer(response)
-            writer.writerow(['Username', 'Role', 'Total Tasks', 'Completed/Active', 'Performance (%)', 'Task ID', 'Task Title', 'Status', 'Notes'])
+            writer.writerow(['Username', 'Role', 'Active Assigned Tasks', 'Performance (%)', 'Task ID', 'Task Title', 'Status', 'Notes'])
             for data in report_data:
                 if not data['tasks']:
-                    writer.writerow([data['username'], data['role'], 0, 0, '0.0', 'N/A', 'No Tasks in Range', 'N/A', ''])
+                    writer.writerow([data['username'], data['role'], 0, '0.0', 'N/A', 'No Tasks in Range', 'N/A', ''])
                 else:
                     for task in data['tasks']:
                         notes_str = " | ".join([f"[{n['created_at']}] {n['user']}: {n['text']}" for n in task['notes']])
-                        writer.writerow([data['username'], data['role'], data['total_tasks'], data['completed_tasks'], data['performance_percentage'], task['id'], task['title'], task['status_display'], notes_str])
+                        writer.writerow([data['username'], data['role'], data['total_tasks'], data['performance_percentage'], task['id'], task['title'], task['status_display'], notes_str])
             return response
 
         # --- EXPORT TO PDF ---
@@ -385,9 +428,11 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
 
             for data in report_data:
                 elements.append(Paragraph(f"<b>{data['username']}</b> (Role: {data['role']})", styles['Heading2']))
+                
+                # UPDATED DESCRIPTION TO EXPLAIN NEW METRICS
                 elements.append(Paragraph(
-                    f"<b>Work Rate Performance:</b> <font color='{'green' if data['performance_percentage'] >= 50 else 'red'}'>{data['performance_percentage']}%</font> "
-                    f"<i>({data['completed_tasks']} out of {data['total_tasks']} Tasks Completed or Highly Active)</i>", 
+                    f"<b>Work Rate Performance:</b> <font color='{'green' if data['performance_percentage'] >= 50 else 'red'}'>{data['performance_percentage']}%</font><br/>"
+                    f"<i><font size=8>(Averaged across {data['total_tasks']} active tasks. IP tasks require 4 notes/period. CP tasks require 6 total notes.)</font></i>", 
                     styles['Normal']
                 ))
                 elements.append(Spacer(1, 6))
