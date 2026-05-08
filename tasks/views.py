@@ -293,7 +293,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         return Response({"message": f"{profile.user.username} has been {status_text}."})
 
     # ==========================================
-    # ENHANCED: TEAM REPORT (STRICT DATE-BASED SCORING)
+    # ENHANCED: TEAM REPORT (STRICT DATE-BASED SCORING & FILTERING)
     # ==========================================
     @action(detail=False, methods=['get'])
     def team_report(self, request):
@@ -361,7 +361,6 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                 notes_in_period_count = 0
                 total_owner_notes_count = 0
                 
-                # --- NEW: Track the unique dates they posted notes ---
                 notes_in_period_dates = set() 
                 total_owner_dates = set()
                 
@@ -394,27 +393,37 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                 if is_active:
                     task_pct = 0
                     
-                    # --- NEW STRICT DATE SCORING RULES APPLIED HERE ---
                     if task.status == 'CP':
-                        # CP: Requires 6 total notes AND notes on at least 3 distinct days.
-                        # We calculate both percentages and use the lowest score to ensure both rules are met.
                         note_score = (total_owner_notes_count / 6.0) * 100
                         date_score = (len(total_owner_dates) / 3.0) * 100
                         task_pct = min(note_score, date_score, 100)
 
                     elif task.status == 'IP':
-                        # IP: Requires notes on 4 distinct days within the selected period.
                         task_pct = min((len(notes_in_period_dates) / 4.0) * 100, 100)
                     
                     sum_task_percentages += task_pct
                     active_tasks.append(task)
                     
-                    task_notes_formatted = [{"user": n.user.username, "text": n.text, "created_at": n.created_at.strftime("%d %b %Y, %H:%M")} for n in task.notes.all()]
+                    # --- FIX: FILTER DISPLAYED NOTES BY DATE ---
+                    filtered_notes = []
+                    for n in task.notes.all():
+                        n_date = n.created_at.date()
+                        in_range = True
+                        if start_dt and n_date < start_dt: in_range = False
+                        if end_dt and n_date > end_dt: in_range = False
+                        
+                        if in_range:
+                            filtered_notes.append({
+                                "user": n.user.username, 
+                                "text": n.text, 
+                                "created_at": n.created_at.strftime("%d %b %Y, %H:%M")
+                            })
+                            
                     task_list.append({
                         "id": task.id, 
                         "title": task.title, 
                         "status_display": task.get_status_display(), 
-                        "notes": task_notes_formatted,
+                        "notes": filtered_notes,
                         "unique_days_count": len(notes_in_period_dates) if task.status == 'IP' else len(total_owner_dates)
                     })
             
@@ -465,7 +474,6 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             for data in report_data:
                 elements.append(Paragraph(f"<b>{data['username']}</b> (Role: {data['role']})", styles['Heading2']))
                 
-                # UPDATED DESCRIPTION TO EXPLAIN UNIQUE DATE METRICS
                 elements.append(Paragraph(
                     f"<b>Work Rate Performance:</b> <font color='{'green' if data['performance_percentage'] >= 50 else 'red'}'>{data['performance_percentage']}%</font><br/>"
                     f"<i><font size=8>(Averaged across {data['total_tasks']} active tasks. IP requires notes on 4 distinct dates. CP requires 6 total notes across at least 3 dates.)</font></i>", 
@@ -479,7 +487,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                     for task in data['tasks']:
                         elements.append(Paragraph(f"<b>Task:</b> {task['title']} | <b>Status:</b> {task['status_display']} | <b>Days Active:</b> {task['unique_days_count']}", styles['Heading4']))
                         if not task['notes']:
-                            elements.append(Paragraph("<i>  - No notes.</i>", styles['Normal']))
+                            elements.append(Paragraph("<i>  - No notes in this date range.</i>", styles['Normal']))
                         else:
                             for note in task['notes']:
                                 elements.append(Paragraph(f"  - <b>{note['user']}</b> ({note['created_at']}): {note['text']}", styles['Normal']))
