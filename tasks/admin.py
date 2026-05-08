@@ -167,6 +167,7 @@ class NoteInline(admin.TabularInline):
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
     list_display = ('title', 'owner', 'supervisor', 'status', 'created_at')
+    list_filter = ('status', 'owner', 'created_at')
     inlines = [NoteInline]
     
     def get_queryset(self, request):
