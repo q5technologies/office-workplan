@@ -271,8 +271,13 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             )
         else:
             return Response([])
-
-        data = [{"id": u.id, "username": f"{u.username} ({u.profile.role})"} for u in targets]
+        
+        # FIX: Append (ON LEAVE) if the switch is true
+        data = []
+        for u in targets:
+            leave_status = " ✈️ (ON LEAVE)" if u.profile.is_on_leave else ""
+            data.append({"id": u.id, "username": f"{u.username} ({u.profile.role}){leave_status}"})
+            
         return Response(data)
 
     # ==========================================
@@ -390,8 +395,13 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             total_active_tasks = len(active_tasks)
             perf_pct = round(sum_task_percentages / total_active_tasks, 1) if total_active_tasks > 0 else 0
 
+            # FIX: Check if the user is on leave and update their displayed username
+            display_name = t_user.username
+            if t_user.profile.is_on_leave:
+                display_name += " ✈️ (ON LEAVE)"
+
             report_data.append({
-                "username": t_user.username, "role": t_user.profile.role,
+                "username": display_name, "role": t_user.profile.role,
                 "total_tasks": total_active_tasks,
                 "performance_percentage": perf_pct, "tasks": task_list
             })

@@ -71,6 +71,7 @@ class Profile(models.Model):
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_profiles'
     )
+    is_on_leave = models.BooleanField(default=False, help_text="Designates whether this user is currently on leave.")
 
     def __str__(self):
         return f"{self.user.username} - {self.role}"

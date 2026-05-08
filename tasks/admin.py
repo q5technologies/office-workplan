@@ -98,7 +98,8 @@ admin.site.register(User, CustomUserAdmin)
 
 @admin.register(Profile)
 class ProfileAdmin(admin.ModelAdmin):
-    list_display = ['user', 'role', 'tenant', 'assigned_supervisor', 'created_by']
+    list_display = ['user', 'role', 'tenant', 'assigned_supervisor', 'is_on_leave', 'created_by']
+    list_editable = ['is_on_leave']
     readonly_fields = ['created_by']
 
     # --- NEW: ENFORCE MAX USERS LIMIT IN DJANGO ADMIN ---
