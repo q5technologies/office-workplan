@@ -271,8 +271,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             )
         else:
             return Response([])
-        
-        # FIX: Append (ON LEAVE) if the switch is true
+
         data = []
         for u in targets:
             leave_status = " ✈️ (ON LEAVE)" if u.profile.is_on_leave else ""
@@ -280,8 +279,21 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             
         return Response(data)
 
+    @action(detail=True, methods=['patch'])
+    def toggle_leave(self, request, pk=None):
+        profile = self.get_object()
+        req_profile = request.user.profile
+        if req_profile.role not in ['HEAD', 'SUBSCRIBER', 'SUP']:
+            return Response({"error": "Permission denied."}, status=403)
+        if req_profile.role == 'SUP' and profile.assigned_supervisor != request.user:
+            return Response({"error": "You can only manage leave for your assigned subordinates."}, status=403)
+        profile.is_on_leave = not profile.is_on_leave
+        profile.save()
+        status_text = "placed on leave" if profile.is_on_leave else "returned from leave"
+        return Response({"message": f"{profile.user.username} has been {status_text}."})
+
     # ==========================================
-    # ENHANCED: TEAM REPORT (PROPORTIONAL WORK RATE + CP RULES)
+    # ENHANCED: TEAM REPORT (STRICT DATE-BASED SCORING)
     # ==========================================
     @action(detail=False, methods=['get'])
     def team_report(self, request):
@@ -346,23 +358,32 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                 if start_dt and task_date < start_dt: created_in_period = False
                 if end_dt and task_date > end_dt: created_in_period = False
                 
-                notes_in_period = 0
-                total_owner_notes = 0 # NEW: Track ALL notes for CP tasks
+                notes_in_period_count = 0
+                total_owner_notes_count = 0
+                
+                # --- NEW: Track the unique dates they posted notes ---
+                notes_in_period_dates = set() 
+                total_owner_dates = set()
                 
                 for note in task.notes.all():
                     if note.user_id == t_user.id:
-                        total_owner_notes += 1
                         note_date = note.created_at.date()
+                        total_owner_notes_count += 1
+                        total_owner_dates.add(note_date)
+                        
                         in_range = True
                         if start_dt and note_date < start_dt: in_range = False
                         if end_dt and note_date > end_dt: in_range = False
-                        if in_range: notes_in_period += 1
+                        
+                        if in_range: 
+                            notes_in_period_count += 1
+                            notes_in_period_dates.add(note_date)
                 
                 is_active = False
                 if not start_dt and not end_dt:
                     is_active = True
                 else:
-                    if created_in_period or notes_in_period > 0:
+                    if created_in_period or notes_in_period_count > 0:
                         is_active = True
                     elif task.status in ['IP', 'NS']:
                         if end_dt and task_date <= end_dt:
@@ -373,13 +394,17 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                 if is_active:
                     task_pct = 0
                     
-                    # --- NEW SCORING RULES APPLIED HERE ---
+                    # --- NEW STRICT DATE SCORING RULES APPLIED HERE ---
                     if task.status == 'CP':
-                        # Completed tasks require 6 TOTAL notes to be fully credited (100%)
-                        task_pct = min((total_owner_notes / 6.0) * 100, 100)
+                        # CP: Requires 6 total notes AND notes on at least 3 distinct days.
+                        # We calculate both percentages and use the lowest score to ensure both rules are met.
+                        note_score = (total_owner_notes_count / 6.0) * 100
+                        date_score = (len(total_owner_dates) / 3.0) * 100
+                        task_pct = min(note_score, date_score, 100)
+
                     elif task.status == 'IP':
-                        # In-Progress tasks require 4 notes IN THE PERIOD to be fully credited (100%)
-                        task_pct = min((notes_in_period / 4.0) * 100, 100)
+                        # IP: Requires notes on 4 distinct days within the selected period.
+                        task_pct = min((len(notes_in_period_dates) / 4.0) * 100, 100)
                     
                     sum_task_percentages += task_pct
                     active_tasks.append(task)
@@ -389,19 +414,20 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                         "id": task.id, 
                         "title": task.title, 
                         "status_display": task.get_status_display(), 
-                        "notes": task_notes_formatted
+                        "notes": task_notes_formatted,
+                        "unique_days_count": len(notes_in_period_dates) if task.status == 'IP' else len(total_owner_dates)
                     })
             
             total_active_tasks = len(active_tasks)
             perf_pct = round(sum_task_percentages / total_active_tasks, 1) if total_active_tasks > 0 else 0
 
-            # FIX: Check if the user is on leave and update their displayed username
             display_name = t_user.username
             if t_user.profile.is_on_leave:
                 display_name += " ✈️ (ON LEAVE)"
 
             report_data.append({
-                "username": display_name, "role": t_user.profile.role,
+                "username": display_name, 
+                "role": t_user.profile.role,
                 "total_tasks": total_active_tasks,
                 "performance_percentage": perf_pct, "tasks": task_list
             })
@@ -411,14 +437,14 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             response = HttpResponse(content_type='text/csv')
             response['Content-Disposition'] = f'attachment; filename="workplan_report_{timezone.now().strftime("%Y%m%d")}.csv"'
             writer = csv.writer(response)
-            writer.writerow(['Username', 'Role', 'Active Assigned Tasks', 'Performance (%)', 'Task ID', 'Task Title', 'Status', 'Notes'])
+            writer.writerow(['Username', 'Role', 'Active Assigned Tasks', 'Performance (%)', 'Task ID', 'Task Title', 'Status', 'Unique Days Noted', 'Notes'])
             for data in report_data:
                 if not data['tasks']:
-                    writer.writerow([data['username'], data['role'], 0, '0.0', 'N/A', 'No Tasks in Range', 'N/A', ''])
+                    writer.writerow([data['username'], data['role'], 0, '0.0', 'N/A', 'No Tasks in Range', 'N/A', '0', ''])
                 else:
                     for task in data['tasks']:
                         notes_str = " | ".join([f"[{n['created_at']}] {n['user']}: {n['text']}" for n in task['notes']])
-                        writer.writerow([data['username'], data['role'], data['total_tasks'], data['performance_percentage'], task['id'], task['title'], task['status_display'], notes_str])
+                        writer.writerow([data['username'], data['role'], data['total_tasks'], data['performance_percentage'], task['id'], task['title'], task['status_display'], task['unique_days_count'], notes_str])
             return response
 
         # --- EXPORT TO PDF ---
@@ -439,10 +465,10 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             for data in report_data:
                 elements.append(Paragraph(f"<b>{data['username']}</b> (Role: {data['role']})", styles['Heading2']))
                 
-                # UPDATED DESCRIPTION TO EXPLAIN NEW METRICS
+                # UPDATED DESCRIPTION TO EXPLAIN UNIQUE DATE METRICS
                 elements.append(Paragraph(
                     f"<b>Work Rate Performance:</b> <font color='{'green' if data['performance_percentage'] >= 50 else 'red'}'>{data['performance_percentage']}%</font><br/>"
-                    f"<i><font size=8>(Averaged across {data['total_tasks']} active tasks. IP tasks require 4 notes/period. CP tasks require 6 total notes.)</font></i>", 
+                    f"<i><font size=8>(Averaged across {data['total_tasks']} active tasks. IP requires notes on 4 distinct dates. CP requires 6 total notes across at least 3 dates.)</font></i>", 
                     styles['Normal']
                 ))
                 elements.append(Spacer(1, 6))
@@ -451,7 +477,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                     elements.append(Paragraph("<i>No tasks found for this user in the specified period.</i>", styles['Normal']))
                 else:
                     for task in data['tasks']:
-                        elements.append(Paragraph(f"<b>Task:</b> {task['title']} | <b>Status:</b> {task['status_display']}", styles['Heading4']))
+                        elements.append(Paragraph(f"<b>Task:</b> {task['title']} | <b>Status:</b> {task['status_display']} | <b>Days Active:</b> {task['unique_days_count']}", styles['Heading4']))
                         if not task['notes']:
                             elements.append(Paragraph("<i>  - No notes.</i>", styles['Normal']))
                         else:
@@ -462,8 +488,8 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
 
             doc.build(elements)
             return response
-        
-        # --- NEW: EXPORT TO HTML (LIVE PREVIEW PAGE) ---
+
+        # --- EXPORT TO HTML (LIVE PREVIEW PAGE) ---
         elif export_format == 'html':
             context = {
                 'report_data': report_data,
@@ -472,6 +498,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             }
             return render(request, 'report_preview.html', context)
 
+        # Default JSON response
         return Response(report_data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
