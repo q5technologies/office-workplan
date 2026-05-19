@@ -16,7 +16,7 @@ from django.http import HttpResponse
 
 # --- Native CSV & PDF Imports ---
 import csv
-from datetime import datetime, timedelta  # FIX: Added timedelta here
+from datetime import datetime, timedelta
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
@@ -272,7 +272,6 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         else:
             return Response([])
 
-        # --- FIX: Inactivity & Leave Checks ---
         thirty_days_ago = timezone.now() - timedelta(days=30)
         
         data = []
@@ -281,8 +280,8 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             if u.profile.is_on_leave:
                 tags.append("✈️ (ON LEAVE)")
             
-            # Check if user has never logged in, or hasn't logged in for 30+ days
-            if not u.last_login or u.last_login < thirty_days_ago:
+            # --- FIX: Only flag users who are marked as staff ---
+            if u.is_staff and (not u.last_login or u.last_login < thirty_days_ago):
                 tags.append("🔴 (INACTIVE)")
                 
             tag_str = f" {' '.join(tags)}" if tags else ""
@@ -441,15 +440,14 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             total_active_tasks = len(active_tasks)
             perf_pct = round(sum_task_percentages / total_active_tasks, 1) if total_active_tasks > 0 else 0
 
-            # --- FIX: Append Inactivity & Leave Tags ---
             display_name = t_user.username
             tags = []
             
             if t_user.profile.is_on_leave:
                 tags.append("✈️ (ON LEAVE)")
             
-            # Check if user has never logged in, or hasn't logged in for 30+ days
-            if not t_user.last_login or t_user.last_login < thirty_days_ago:
+            # --- FIX: Only flag users who are marked as staff ---
+            if t_user.is_staff and (not t_user.last_login or t_user.last_login < thirty_days_ago):
                 tags.append("🔴 (INACTIVE)")
                 
             if tags:
