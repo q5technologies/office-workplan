@@ -16,7 +16,7 @@ from django.http import HttpResponse
 
 # --- Native CSV & PDF Imports ---
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta  # FIX: Added timedelta here
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
@@ -272,10 +272,21 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         else:
             return Response([])
 
+        # --- FIX: Inactivity & Leave Checks ---
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        
         data = []
         for u in targets:
-            leave_status = " ✈️ (ON LEAVE)" if u.profile.is_on_leave else ""
-            data.append({"id": u.id, "username": f"{u.username} ({u.profile.role}){leave_status}"})
+            tags = []
+            if u.profile.is_on_leave:
+                tags.append("✈️ (ON LEAVE)")
+            
+            # Check if user has never logged in, or hasn't logged in for 30+ days
+            if not u.last_login or u.last_login < thirty_days_ago:
+                tags.append("🔴 (INACTIVE)")
+                
+            tag_str = f" {' '.join(tags)}" if tags else ""
+            data.append({"id": u.id, "username": f"{u.username} ({u.profile.role}){tag_str}"})
             
         return Response(data)
 
@@ -293,7 +304,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         return Response({"message": f"{profile.user.username} has been {status_text}."})
 
     # ==========================================
-    # ENHANCED: TEAM REPORT (STRICT DATE-BASED SCORING & FILTERING)
+    # ENHANCED: TEAM REPORT
     # ==========================================
     @action(detail=False, methods=['get'])
     def team_report(self, request):
@@ -341,6 +352,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         ).distinct()
 
         report_data = []
+        thirty_days_ago = timezone.now() - timedelta(days=30)
 
         for t_user in target_users:
             user_tasks = t_user.my_tasks.all()
@@ -404,7 +416,6 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                     sum_task_percentages += task_pct
                     active_tasks.append(task)
                     
-                    # --- FIX: FILTER DISPLAYED NOTES BY DATE ---
                     filtered_notes = []
                     for n in task.notes.all():
                         n_date = n.created_at.date()
@@ -430,9 +441,19 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             total_active_tasks = len(active_tasks)
             perf_pct = round(sum_task_percentages / total_active_tasks, 1) if total_active_tasks > 0 else 0
 
+            # --- FIX: Append Inactivity & Leave Tags ---
             display_name = t_user.username
+            tags = []
+            
             if t_user.profile.is_on_leave:
-                display_name += " ✈️ (ON LEAVE)"
+                tags.append("✈️ (ON LEAVE)")
+            
+            # Check if user has never logged in, or hasn't logged in for 30+ days
+            if not t_user.last_login or t_user.last_login < thirty_days_ago:
+                tags.append("🔴 (INACTIVE)")
+                
+            if tags:
+                display_name += f" {' '.join(tags)}"
 
             report_data.append({
                 "username": display_name, 
