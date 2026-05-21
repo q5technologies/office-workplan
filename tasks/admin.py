@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from django.contrib.auth.models import User
+from django.contrib.auth.models import User, Permission
 from django.db.models import Q
 from .models import Task, Note
 from users.models import Profile, Subscription
@@ -21,7 +21,7 @@ class SubscriptionAdmin(admin.ModelAdmin):
 
 class CustomUserAdmin(UserAdmin):
     
-    # --- NEW: ENFORCE MAX USERS LIMIT IN DJANGO ADMIN ---
+    # --- ENFORCE MAX USERS LIMIT IN DJANGO ADMIN ---
     def has_add_permission(self, request):
         can_add = super().has_add_permission(request)
         if not can_add:
@@ -63,33 +63,40 @@ class CustomUserAdmin(UserAdmin):
 
         return qs.filter(id=request.user.id).distinct()
 
-    # --- NEW: VISUALLY LOCK SUPERUSER FIELDS ---
+    # --- FIX: ONLY VISUALLY LOCK THE SUPERUSER FIELD ---
     def get_readonly_fields(self, request, obj=None):
         readonly = list(super().get_readonly_fields(request, obj))
         
         # If the person logged in is NOT the master system owner...
         if not request.user.is_superuser:
-            # Lock down these security fields so they cannot be clicked
+            # We ONLY lock superuser. Permissions and Groups remain editable!
             if 'is_superuser' not in readonly: readonly.append('is_superuser')
-            if 'groups' not in readonly: readonly.append('groups')
-            if 'user_permissions' not in readonly: readonly.append('user_permissions')
             
         return tuple(readonly)
 
+    # --- NEW: FILTER OUT DANGEROUS PERMISSIONS ---
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        # Intercept the permissions box before it loads on the screen
+        if not request.user.is_superuser:
+            if db_field.name == "user_permissions":
+                # Remove any permission related to Subscriptions or Tokens from the list
+                kwargs["queryset"] = db_field.related_model.objects.exclude(
+                    Q(content_type__model__icontains='subscription') |
+                    Q(content_type__model__icontains='token') |
+                    Q(codename__icontains='token')
+                )
+        return super().formfield_for_manytomany(db_field, request, **kwargs)
+
     def save_model(self, request, obj, form, change):
-        # --- NEW: HARD LOCK SUPERUSER STATUS IN DATABASE ---
-        
-        # 1. A non-superuser can NEVER grant superuser status
+        # --- HARD LOCK SUPERUSER STATUS IN DATABASE ---
         if not request.user.is_superuser:
             obj.is_superuser = False
             
-        # 2. Even if a true superuser is editing them, a tenant employee can NEVER be a superuser
         try:
             if hasattr(obj, 'profile') and obj.profile.tenant is not None:
                 obj.is_superuser = False
         except Exception:
             pass
-
 
         if change:
             old_user = User.objects.get(pk=obj.pk)
