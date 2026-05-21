@@ -1,3 +1,5 @@
+from django.utils.html import format_html
+from django.urls import reverse
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin, GroupAdmin
 from django.contrib.auth.models import User, Permission, Group
@@ -286,34 +288,44 @@ class TaskAdmin(admin.ModelAdmin):
 
 @admin.register(Note)
 class NoteAdmin(admin.ModelAdmin):
-    list_display = ('task', 'text', 'user', 'created_at')
+    # FIX 1: Replace 'task' with our custom 'task_link'
+    list_display = ('task_link', 'text', 'user', 'created_at')
     
-    # 1. FIX: Add 'user' to readonly_fields to remove the selection dropdown
-    readonly_fields = ('created_at', 'user')
+    # FIX 2: Shift Django's default click-to-edit link to the 'text' column
+    list_display_links = ('text',) 
+    
+    # FIX 3: Define the custom task link
+    def task_link(self, obj):
+        # Get the URL for the specific Task Admin change page
+        url = reverse('admin:tasks_task_change', args=[obj.task.id])
+        # Return a clickable link (styled blue to look like a link)
+        return format_html('<a href="{}" style="color: #2563eb; font-weight: bold;">{}</a>', url, obj.task.title)
+    
+    task_link.short_description = 'Task'
+    task_link.admin_order_field = 'task__title' # Keeps the column sortable!
 
-    # --- ADMIN PANEL FILTERS ---
-    list_filter = (
-        ('user', admin.RelatedOnlyFieldListFilter), # Filters by individual (maintains privacy!)
-        'created_at',                               # Side-bar date filter
-    )
-    date_hierarchy = 'created_at' # Top-bar date/month drill-down
+    # ... KEEP the rest of your NoteAdmin methods exactly as they are ...
+    
+    def get_readonly_fields(self, request, obj=None):
+        return ('created_at', 'user')
 
-    # 2. FIX: Intercept the save process to automatically assign the logged-in user
     def save_model(self, request, obj, form, change):
-        # If this is a brand new note (it doesn't have a user attached yet)
-        if getattr(obj, 'user', None) is None:
-            obj.user = request.user  # Force it to the logged-in user
-            
+        if not obj.pk: 
+            obj.user = request.user
         super().save_model(request, obj, form, change)
+
+    list_filter = (
+        ('user', admin.RelatedOnlyFieldListFilter), 
+        'created_at',                               
+    )
+    date_hierarchy = 'created_at' 
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         
         if request.user.is_superuser:
-            # STRICT PRIVACY: Superadmins see NO notes from tenant companies.
             return qs.none()
 
-        # HEAD and SUBSCRIBER see ALL notes in their tenant
         try:
             role = request.user.profile.role
             tenant = request.user.profile.tenant
@@ -324,8 +336,7 @@ class NoteAdmin(admin.ModelAdmin):
                     Q(task__owner__profile__tenant=tenant) &
                     (Q(task__owner=request.user) | Q(task__supervisor=request.user) | Q(task__owner__profile__assigned_supervisor=request.user))
                 ).distinct()
-        except Exception:
+        except:
             pass
-            
-        # Standard Subordinates only see their own notes
-        return qs.filter(user=request.user)
+
+        return qs.filter(user=request.user).distinct()
