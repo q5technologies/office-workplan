@@ -188,11 +188,12 @@ class NoteInline(admin.TabularInline):
 class TaskAdmin(admin.ModelAdmin):
     list_display = ('title', 'owner', 'supervisor', 'status', 'created_at')
     list_filter = (('owner', admin.RelatedOnlyFieldListFilter), 'created_at')
-    inlines = [NoteInline]
-
+    
     formfield_overrides = {
         models.TextField: {'widget': AutoResizeTextarea},
     }
+
+    inlines = [NoteInline]
 
     def save_formset(self, request, form, formset, change):
         instances = formset.save(commit=False)
