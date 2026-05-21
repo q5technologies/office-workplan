@@ -272,7 +272,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         else:
             return Response([])
 
-        thirty_days_ago = timezone.now() - timedelta(days=30)
+        seven_days_ago = timezone.now() - timedelta(days=7)
         
         data = []
         for u in targets:
@@ -281,7 +281,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                 tags.append("✈️ (ON LEAVE)")
             
             # --- FIX: Only flag users who are marked as staff ---
-            if u.is_staff and (not u.last_login or u.last_login < thirty_days_ago):
+            if u.is_staff and (not u.last_login or u.last_login < seven_days_ago):
                 tags.append("🔴 (INACTIVE)")
                 
             tag_str = f" {' '.join(tags)}" if tags else ""
@@ -351,7 +351,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         ).distinct()
 
         report_data = []
-        thirty_days_ago = timezone.now() - timedelta(days=30)
+        seven_days_ago = timezone.now() - timedelta(days=7)
 
         for t_user in target_users:
             user_tasks = t_user.my_tasks.all()
