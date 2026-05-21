@@ -213,13 +213,23 @@ class ProfileAdmin(admin.ModelAdmin):
 class NoteInline(admin.TabularInline):
     model = Note
     extra = 1
-    fields = ['user', 'text']
+    readonly_fields = ['user', 'created_at']  # Prevent changing the author and timestamp of notes
 
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
     list_display = ('title', 'owner', 'supervisor', 'status', 'created_at')
     list_filter = (('owner', admin.RelatedOnlyFieldListFilter), 'created_at')
     inlines = [NoteInline]
+
+    # FIX: Intercept the inline save to attach the logged-in user automatically
+    def save_formset(self, request, form, formset, change):
+        instances = formset.save(commit=False)
+        for instance in instances:
+            # Check if this is a newly created Note that lacks a user
+            if isinstance(instance, Note) and not getattr(instance, 'user_id', None):
+                instance.user = request.user
+            instance.save()
+        formset.save_m2m()
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)
