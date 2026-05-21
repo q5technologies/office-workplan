@@ -278,20 +278,21 @@ class TaskAdmin(admin.ModelAdmin):
 class NoteAdmin(admin.ModelAdmin):
     list_display = ('task', 'text', 'user', 'created_at')
     
-    # 1. FIX: Add 'user' to readonly_fields to remove the dropdown and lock it
+    # 1. FIX: Add 'user' to readonly_fields to remove the selection dropdown
     readonly_fields = ('created_at', 'user')
 
     # --- ADMIN PANEL FILTERS ---
     list_filter = (
-        ('user', admin.RelatedOnlyFieldListFilter), 
-        'created_at',                               
+        ('user', admin.RelatedOnlyFieldListFilter), # Filters by individual (maintains privacy!)
+        'created_at',                               # Side-bar date filter
     )
-    date_hierarchy = 'created_at' 
+    date_hierarchy = 'created_at' # Top-bar date/month drill-down
 
-    # 2. FIX: Automatically assign the logged-in user behind the scenes
+    # 2. FIX: Intercept the save process to automatically assign the logged-in user
     def save_model(self, request, obj, form, change):
-        if not obj.pk:  # If this is a brand new note being created
-            obj.user = request.user
+        # If this is a brand new note (it doesn't have a user attached yet)
+        if getattr(obj, 'user', None) is None:
+            obj.user = request.user  # Force it to the logged-in user
             
         super().save_model(request, obj, form, change)
 
@@ -315,5 +316,6 @@ class NoteAdmin(admin.ModelAdmin):
                 ).distinct()
         except Exception:
             pass
-
-        return qs.filter(user=request.user).distinct()
+            
+        # Standard Subordinates only see their own notes
+        return qs.filter(user=request.user)
