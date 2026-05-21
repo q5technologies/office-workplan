@@ -250,6 +250,10 @@ class TaskAdmin(admin.ModelAdmin):
 class NoteAdmin(admin.ModelAdmin):
     list_display = ('task_link', 'text', 'user', 'created_at')
     list_display_links = ('text',) 
+
+    formfield_overrides = {
+        models.TextField: {'widget': AutoResizeTextarea},
+    }
     
     def task_link(self, obj):
         url = reverse('admin:tasks_task_change', args=[obj.task.id])
