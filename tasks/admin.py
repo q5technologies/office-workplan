@@ -212,7 +212,7 @@ class ProfileAdmin(admin.ModelAdmin):
 
 class NoteInline(admin.TabularInline):
     model = Note
-    extra = 1
+    extra = 0
     readonly_fields = ['user', 'created_at']  # Prevent changing the author and timestamp of notes
 
 @admin.register(Task)
