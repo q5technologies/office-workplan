@@ -1,3 +1,5 @@
+from django.forms import Textarea
+from django.utils.safestring import mark_safe
 from django.utils.html import format_html
 from django.urls import reverse
 from django.contrib import admin
@@ -6,6 +8,38 @@ from django.contrib.auth.models import User, Permission, Group
 from django.db.models import Q
 from .models import Task, Note
 from users.models import Profile, Subscription
+
+class AutoResizeTextarea(Textarea):
+    """A custom widget that forces TextFields to auto-grow as the user types."""
+    def render(self, name, value, attrs=None, renderer=None):
+        if attrs is None:
+            attrs = {}
+        # Start the box small (2 rows) and hide the default ugly scrollbar
+        attrs.update({'rows': '2', 'style': 'width: 100%; min-height: 50px; resize: none; overflow: hidden;'})
+        
+        html = super().render(name, value, attrs, renderer)
+        
+        # Inject a tiny piece of JavaScript to handle the resizing math
+        script = f"""
+        <script>
+            (function() {{
+                const initResize = () => {{
+                    const tx = document.getElementsByName('{name}')[0];
+                    if (tx) {{
+                        tx.style.height = 'auto';
+                        tx.style.height = (tx.scrollHeight + 2) + 'px';
+                        tx.addEventListener('input', function() {{
+                            this.style.height = 'auto';
+                            this.style.height = (this.scrollHeight + 2) + 'px';
+                        }});
+                    }}
+                }};
+                window.addEventListener('load', initResize);
+                setTimeout(initResize, 100); // Failsafe for Django Admin loading
+            }})();
+        </script>
+        """
+        return mark_safe(html + script)
 
 # ==========================================
 # NEW: SUBSCRIPTION MANAGEMENT
@@ -284,6 +318,11 @@ class TaskAdmin(admin.ModelAdmin):
         if not getattr(obj, 'owner', None):
             obj.owner = request.user
         super().save_model(request, obj, form, change)
+
+    # --- NEW: TELL DJANGO TO USE OUR AUTO-RESIZE WIDGET ---
+    formfield_overrides = {
+        models.TextField: {'widget': AutoResizeTextarea},
+    }    
 
 
 @admin.register(Note)
