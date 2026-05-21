@@ -1,14 +1,20 @@
-from django.forms import Textarea
-from django.utils.safestring import mark_safe
-from django.utils.html import format_html
-from django.urls import reverse
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin, GroupAdmin
 from django.contrib.auth.models import User, Permission, Group
 from django.db.models import Q
+from django.db import models
+from django.core.exceptions import ObjectDoesNotExist
+from django.forms import Textarea
+from django.utils.safestring import mark_safe
+from django.utils.html import format_html
+from django.urls import reverse
+
 from .models import Task, Note
 from users.models import Profile, Subscription
 
+# ==========================================
+# CUSTOM UI WIDGETS
+# ==========================================
 class AutoResizeTextarea(Textarea):
     """A custom widget that forces TextFields to auto-grow as the user types."""
     def render(self, name, value, attrs=None, renderer=None):
@@ -35,14 +41,15 @@ class AutoResizeTextarea(Textarea):
                     }}
                 }};
                 window.addEventListener('load', initResize);
-                setTimeout(initResize, 100); // Failsafe for Django Admin loading
+                setTimeout(initResize, 100); 
             }})();
         </script>
         """
         return mark_safe(html + script)
 
+
 # ==========================================
-# NEW: SUBSCRIPTION MANAGEMENT
+# SUBSCRIPTION MANAGEMENT
 # ==========================================
 @admin.register(Subscription)
 class SubscriptionAdmin(admin.ModelAdmin):
@@ -52,7 +59,7 @@ class SubscriptionAdmin(admin.ModelAdmin):
 
 
 # ==========================================
-# 1. NEW: SECURE GROUP MANAGEMENT
+# SECURE GROUP MANAGEMENT
 # ==========================================
 class CustomGroupAdmin(GroupAdmin):
     def formfield_for_manytomany(self, db_field, request, **kwargs):
@@ -66,41 +73,32 @@ class CustomGroupAdmin(GroupAdmin):
                 )
         return super().formfield_for_manytomany(db_field, request, **kwargs)
 
-# Replace the default Group panel with our secure one
 admin.site.unregister(Group)
 admin.site.register(Group, CustomGroupAdmin)
 
 
 # ==========================================
-# 2. USER & PROFILE MANAGEMENT
+# USER & PROFILE MANAGEMENT
 # ==========================================
 class CustomUserAdmin(UserAdmin):
     
-    # --- ENFORCE MAX USERS LIMIT IN DJANGO ADMIN ---
     def has_add_permission(self, request):
         can_add = super().has_add_permission(request)
-        if not can_add:
-            return False
-
+        if not can_add: return False
         try:
             profile = request.user.profile
             if profile.role == 'SUBSCRIBER' and profile.tenant:
-                current_user_count = Profile.objects.filter(tenant=profile.tenant).count()
-                if current_user_count >= profile.tenant.max_users:
+                if Profile.objects.filter(tenant=profile.tenant).count() >= profile.tenant.max_users:
                     return False
         except Exception:
             pass
-
         return True
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        
         if request.user.is_superuser:
             return qs.filter(
-                Q(id=request.user.id) | 
-                Q(profile__role='SUBSCRIBER') |
-                Q(profile__tenant__isnull=True)
+                Q(id=request.user.id) | Q(profile__role='SUBSCRIBER') | Q(profile__tenant__isnull=True)
             ).distinct()
         
         try:
@@ -109,52 +107,32 @@ class CustomUserAdmin(UserAdmin):
             if role in ['SUBSCRIBER', 'HEAD']:
                 return qs.filter(profile__tenant=tenant).distinct()
             elif role == 'SUP':
-                return qs.filter(
-                    Q(id=request.user.id) | 
-                    Q(profile__assigned_supervisor=request.user)
-                ).distinct()
+                return qs.filter(Q(id=request.user.id) | Q(profile__assigned_supervisor=request.user)).distinct()
         except:
             pass
-
         return qs.filter(id=request.user.id).distinct()
 
     def get_readonly_fields(self, request, obj=None):
         readonly = list(super().get_readonly_fields(request, obj))
-        
-        # Only lock the actual superuser checkbox
         if not request.user.is_superuser:
             if 'is_superuser' not in readonly: readonly.append('is_superuser')
-            
         return tuple(readonly)
 
-    # --- FILTER OUT DANGEROUS PERMISSIONS AND GROUPS ---
     def formfield_for_manytomany(self, db_field, request, **kwargs):
         if not request.user.is_superuser:
-            
-            # 1. Filter the individual permissions list
             if db_field.name == "user_permissions":
                 kwargs["queryset"] = db_field.related_model.objects.exclude(
-                    Q(content_type__model__icontains='subscription') |
-                    Q(content_type__model__icontains='token') |
-                    Q(codename__icontains='token')
+                    Q(content_type__model__icontains='subscription') | Q(content_type__model__icontains='token') | Q(codename__icontains='token')
                 )
-                
-            # 2. FIX: Filter the Groups list! 
-            # Hide any groups that already possess dangerous permissions
             elif db_field.name == "groups":
                 kwargs["queryset"] = db_field.related_model.objects.exclude(
-                    Q(permissions__content_type__model__icontains='subscription') |
-                    Q(permissions__content_type__model__icontains='token') |
-                    Q(permissions__codename__icontains='token')
+                    Q(permissions__content_type__model__icontains='subscription') | Q(permissions__content_type__model__icontains='token') | Q(permissions__codename__icontains='token')
                 ).distinct()
-                
         return super().formfield_for_manytomany(db_field, request, **kwargs)
 
     def save_model(self, request, obj, form, change):
-        # --- HARD LOCK SUPERUSER STATUS IN DATABASE ---
         if not request.user.is_superuser:
             obj.is_superuser = False
-            
         try:
             if hasattr(obj, 'profile') and obj.profile.tenant is not None:
                 obj.is_superuser = False
@@ -169,14 +147,8 @@ class CustomUserAdmin(UserAdmin):
         super().save_model(request, obj, form, change)
 
         if not change: 
-            tenant = None
-            if hasattr(request.user, 'profile'):
-                tenant = request.user.profile.tenant
-
-            Profile.objects.filter(user=obj).update(
-                created_by=request.user,
-                tenant=tenant
-            )
+            tenant = request.user.profile.tenant if hasattr(request.user, 'profile') else None
+            Profile.objects.filter(user=obj).update(created_by=request.user, tenant=tenant)
 
 admin.site.unregister(User)
 admin.site.register(User, CustomUserAdmin)
@@ -185,71 +157,32 @@ admin.site.register(User, CustomUserAdmin)
 @admin.register(Profile)
 class ProfileAdmin(admin.ModelAdmin):
     list_display = ['user', 'role', 'tenant', 'assigned_supervisor', 'is_on_leave', 'created_by']
-    list_editable = ['is_on_leave']
+    list_editable = ['is_on_leave'] 
+    list_filter = ['is_on_leave', 'role']
     readonly_fields = ['created_by']
 
-    # --- NEW: ENFORCE MAX USERS LIMIT IN DJANGO ADMIN ---
-    def has_add_permission(self, request):
-        can_add = super().has_add_permission(request)
-        if not can_add:
-            return False
-
-        try:
-            profile = request.user.profile
-            if profile.role == 'SUBSCRIBER' and profile.tenant:
-                current_user_count = Profile.objects.filter(tenant=profile.tenant).count()
-                if current_user_count >= profile.tenant.max_users:
-                    return False
-        except Exception:
-            pass
-
-        return True
-    
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        
-        if request.user.is_superuser:
-            # Mirrors the strict bulletproof privacy applied to the User Admin
-            return qs.filter(
-                Q(user=request.user) | 
-                Q(role='SUBSCRIBER') |
-                Q(tenant__isnull=True)
-            ).distinct()
-
-        # FIX: HEAD and SUBSCRIBER see ALL profiles in their tenant
+        if request.user.is_superuser: return qs
         try:
             role = request.user.profile.role
             tenant = request.user.profile.tenant
             if role in ['SUBSCRIBER', 'HEAD']:
-                return qs.filter(tenant=tenant).distinct()
+                return qs.filter(tenant=tenant)
             elif role == 'SUP':
-                return qs.filter(
-                    Q(user=request.user) | 
-                    Q(assigned_supervisor=request.user)
-                ).distinct()
-        except:
-            pass
-
-        return qs.filter(user=request.user).distinct()
-
-    def save_model(self, request, obj, form, change):
-        if not obj.pk: 
-            obj.created_by = request.user
-            # FIX: Auto-assign the tenant if a profile is created manually
-            if not obj.tenant and hasattr(request.user, 'profile'):
-                obj.tenant = request.user.profile.tenant
-                
-        super().save_model(request, obj, form, change)
+                return qs.filter(Q(user=request.user) | Q(assigned_supervisor=request.user))
+        except: pass
+        return qs.filter(user=request.user)
 
 
 # ==========================================
-# 2. TASK & NOTE PRIVACY
+# TASK & NOTE MANAGEMENT
 # ==========================================
-
 class NoteInline(admin.TabularInline):
     model = Note
-    extra = 0
-    readonly_fields = ['user', 'created_at']  # Prevent changing the author and timestamp of notes
+    extra = 1
+    readonly_fields = ('user', 'created_at')
+
 
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
@@ -257,24 +190,21 @@ class TaskAdmin(admin.ModelAdmin):
     list_filter = (('owner', admin.RelatedOnlyFieldListFilter), 'created_at')
     inlines = [NoteInline]
 
-    # FIX: Intercept the inline save to attach the logged-in user automatically
+    formfield_overrides = {
+        models.TextField: {'widget': AutoResizeTextarea},
+    }
+
     def save_formset(self, request, form, formset, change):
         instances = formset.save(commit=False)
         for instance in instances:
-            # Check if this is a newly created Note that lacks a user
             if isinstance(instance, Note) and not getattr(instance, 'user_id', None):
                 instance.user = request.user
             instance.save()
         formset.save_m2m()
-    
+
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        
-        if request.user.is_superuser:
-            # STRICT PRIVACY: Superadmins see NO tasks from tenant companies.
-            return qs.none()
-
-        # FIX: HEAD and SUBSCRIBER see ALL tasks in their tenant
+        if request.user.is_superuser: return qs.none()
         try:
             role = request.user.profile.role
             tenant = request.user.profile.tenant
@@ -285,9 +215,7 @@ class TaskAdmin(admin.ModelAdmin):
                     Q(owner__profile__tenant=tenant) &
                     (Q(owner=request.user) | Q(supervisor=request.user) | Q(owner__profile__assigned_supervisor=request.user))
                 ).distinct()
-        except:
-            pass
-            
+        except: pass
         return qs.filter(owner=request.user).distinct()
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
@@ -295,7 +223,6 @@ class TaskAdmin(admin.ModelAdmin):
             kwargs["queryset"] = User.objects.none() 
             return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-        # FIX: Ensure dropdown options only show people within the same company
         if db_field.name in ["owner", "supervisor"]:
             try:
                 role = request.user.profile.role
@@ -304,8 +231,7 @@ class TaskAdmin(admin.ModelAdmin):
                     kwargs["queryset"] = User.objects.filter(profile__tenant=tenant).distinct()
                 elif role == 'SUP':
                     kwargs["queryset"] = User.objects.filter(
-                        Q(id=request.user.id) | 
-                        Q(profile__assigned_supervisor=request.user)
+                        Q(id=request.user.id) | Q(profile__assigned_supervisor=request.user)
                     ).distinct()
                 else:
                     kwargs["queryset"] = User.objects.filter(id=request.user.id)
@@ -319,32 +245,19 @@ class TaskAdmin(admin.ModelAdmin):
             obj.owner = request.user
         super().save_model(request, obj, form, change)
 
-    # --- NEW: TELL DJANGO TO USE OUR AUTO-RESIZE WIDGET ---
-    formfield_overrides = {
-        models.TextField: {'widget': AutoResizeTextarea},
-    }    
-
 
 @admin.register(Note)
 class NoteAdmin(admin.ModelAdmin):
-    # FIX 1: Replace 'task' with our custom 'task_link'
     list_display = ('task_link', 'text', 'user', 'created_at')
-    
-    # FIX 2: Shift Django's default click-to-edit link to the 'text' column
     list_display_links = ('text',) 
     
-    # FIX 3: Define the custom task link
     def task_link(self, obj):
-        # Get the URL for the specific Task Admin change page
         url = reverse('admin:tasks_task_change', args=[obj.task.id])
-        # Return a clickable link (styled blue to look like a link)
         return format_html('<a href="{}" style="color: #2563eb; font-weight: bold;">{}</a>', url, obj.task.title)
     
     task_link.short_description = 'Task'
-    task_link.admin_order_field = 'task__title' # Keeps the column sortable!
+    task_link.admin_order_field = 'task__title' 
 
-    # ... KEEP the rest of your NoteAdmin methods exactly as they are ...
-    
     def get_readonly_fields(self, request, obj=None):
         return ('created_at', 'user')
 
@@ -361,10 +274,7 @@ class NoteAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        
-        if request.user.is_superuser:
-            return qs.none()
-
+        if request.user.is_superuser: return qs.none()
         try:
             role = request.user.profile.role
             tenant = request.user.profile.tenant
@@ -375,7 +285,5 @@ class NoteAdmin(admin.ModelAdmin):
                     Q(task__owner__profile__tenant=tenant) &
                     (Q(task__owner=request.user) | Q(task__supervisor=request.user) | Q(task__owner__profile__assigned_supervisor=request.user))
                 ).distinct()
-        except:
-            pass
-
+        except: pass
         return qs.filter(user=request.user).distinct()
