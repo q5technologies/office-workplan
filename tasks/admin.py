@@ -1,6 +1,6 @@
 from django.contrib import admin
-from django.contrib.auth.admin import UserAdmin
-from django.contrib.auth.models import User, Permission
+from django.contrib.auth.admin import UserAdmin, GroupAdmin
+from django.contrib.auth.models import User, Permission, Group
 from django.db.models import Q
 from .models import Task, Note
 from users.models import Profile, Subscription
@@ -16,9 +16,28 @@ class SubscriptionAdmin(admin.ModelAdmin):
 
 
 # ==========================================
-# 1. USER & PROFILE MANAGEMENT
+# 1. NEW: SECURE GROUP MANAGEMENT
 # ==========================================
+class CustomGroupAdmin(GroupAdmin):
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        # Prevent non-superadmins from adding dangerous permissions to a Group
+        if not request.user.is_superuser:
+            if db_field.name == "permissions":
+                kwargs["queryset"] = db_field.related_model.objects.exclude(
+                    Q(content_type__model__icontains='subscription') |
+                    Q(content_type__model__icontains='token') |
+                    Q(codename__icontains='token')
+                )
+        return super().formfield_for_manytomany(db_field, request, **kwargs)
 
+# Replace the default Group panel with our secure one
+admin.site.unregister(Group)
+admin.site.register(Group, CustomGroupAdmin)
+
+
+# ==========================================
+# 2. USER & PROFILE MANAGEMENT
+# ==========================================
 class CustomUserAdmin(UserAdmin):
     
     # --- ENFORCE MAX USERS LIMIT IN DJANGO ADMIN ---
@@ -63,28 +82,36 @@ class CustomUserAdmin(UserAdmin):
 
         return qs.filter(id=request.user.id).distinct()
 
-    # --- FIX: ONLY VISUALLY LOCK THE SUPERUSER FIELD ---
     def get_readonly_fields(self, request, obj=None):
         readonly = list(super().get_readonly_fields(request, obj))
         
-        # If the person logged in is NOT the master system owner...
+        # Only lock the actual superuser checkbox
         if not request.user.is_superuser:
-            # We ONLY lock superuser. Permissions and Groups remain editable!
             if 'is_superuser' not in readonly: readonly.append('is_superuser')
             
         return tuple(readonly)
 
-    # --- NEW: FILTER OUT DANGEROUS PERMISSIONS ---
+    # --- FILTER OUT DANGEROUS PERMISSIONS AND GROUPS ---
     def formfield_for_manytomany(self, db_field, request, **kwargs):
-        # Intercept the permissions box before it loads on the screen
         if not request.user.is_superuser:
+            
+            # 1. Filter the individual permissions list
             if db_field.name == "user_permissions":
-                # Remove any permission related to Subscriptions or Tokens from the list
                 kwargs["queryset"] = db_field.related_model.objects.exclude(
                     Q(content_type__model__icontains='subscription') |
                     Q(content_type__model__icontains='token') |
                     Q(codename__icontains='token')
                 )
+                
+            # 2. FIX: Filter the Groups list! 
+            # Hide any groups that already possess dangerous permissions
+            elif db_field.name == "groups":
+                kwargs["queryset"] = db_field.related_model.objects.exclude(
+                    Q(permissions__content_type__model__icontains='subscription') |
+                    Q(permissions__content_type__model__icontains='token') |
+                    Q(permissions__codename__icontains='token')
+                ).distinct()
+                
         return super().formfield_for_manytomany(db_field, request, **kwargs)
 
     def save_model(self, request, obj, form, change):
