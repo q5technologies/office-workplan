@@ -277,14 +277,23 @@ class TaskAdmin(admin.ModelAdmin):
 @admin.register(Note)
 class NoteAdmin(admin.ModelAdmin):
     list_display = ('task', 'text', 'user', 'created_at')
-    readonly_fields = ('created_at',)
+    
+    # 1. FIX: Add 'user' to readonly_fields to remove the dropdown and lock it
+    readonly_fields = ('created_at', 'user')
 
-    # --- NEW: ADMIN PANEL FILTERS ---
+    # --- ADMIN PANEL FILTERS ---
     list_filter = (
-        ('user', admin.RelatedOnlyFieldListFilter), # Filters by individual (maintains privacy!)
-        'created_at',                               # Side-bar date filter
+        ('user', admin.RelatedOnlyFieldListFilter), 
+        'created_at',                               
     )
-    date_hierarchy = 'created_at' # Top-bar date/month drill-down
+    date_hierarchy = 'created_at' 
+
+    # 2. FIX: Automatically assign the logged-in user behind the scenes
+    def save_model(self, request, obj, form, change):
+        if not obj.pk:  # If this is a brand new note being created
+            obj.user = request.user
+            
+        super().save_model(request, obj, form, change)
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -293,7 +302,7 @@ class NoteAdmin(admin.ModelAdmin):
             # STRICT PRIVACY: Superadmins see NO notes from tenant companies.
             return qs.none()
 
-        # FIX: HEAD and SUBSCRIBER see ALL notes in their tenant
+        # HEAD and SUBSCRIBER see ALL notes in their tenant
         try:
             role = request.user.profile.role
             tenant = request.user.profile.tenant
@@ -304,7 +313,7 @@ class NoteAdmin(admin.ModelAdmin):
                     Q(task__owner__profile__tenant=tenant) &
                     (Q(task__owner=request.user) | Q(task__supervisor=request.user) | Q(task__owner__profile__assigned_supervisor=request.user))
                 ).distinct()
-        except:
+        except Exception:
             pass
 
-        return qs.filter(task__owner=request.user).distinct()
+        return qs.filter(user=request.user).distinct()
