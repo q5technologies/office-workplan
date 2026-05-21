@@ -11,7 +11,6 @@ class Task(models.Model):
         POSTPONED = 'PP', 'Postponed'
 
     title = models.CharField(max_length=200)
-    description = models.TextField()
     
     # The person who planned the work
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='my_tasks')
