@@ -23,18 +23,14 @@ class CustomUserAdmin(UserAdmin):
     
     # --- NEW: ENFORCE MAX USERS LIMIT IN DJANGO ADMIN ---
     def has_add_permission(self, request):
-        # 1. Check standard Django permissions first
         can_add = super().has_add_permission(request)
         if not can_add:
             return False
 
-        # 2. If the user is a SUBSCRIBER, check their subscription limit
         try:
             profile = request.user.profile
             if profile.role == 'SUBSCRIBER' and profile.tenant:
                 current_user_count = Profile.objects.filter(tenant=profile.tenant).count()
-                
-                # If they hit the limit, return False to block user creation
                 if current_user_count >= profile.tenant.max_users:
                     return False
         except Exception:
@@ -46,18 +42,12 @@ class CustomUserAdmin(UserAdmin):
         qs = super().get_queryset(request)
         
         if request.user.is_superuser:
-            # BULLETPROOF SAAS PRIVACY: Superadmins ONLY see:
-            # 1. Themselves
-            # 2. SUBSCRIBERs (The company account owners)
-            # 3. New accounts that haven't been assigned to a company yet.
-            # They will NEVER see a HEAD, SUP, or SUB that belongs to a company.
             return qs.filter(
                 Q(id=request.user.id) | 
                 Q(profile__role='SUBSCRIBER') |
                 Q(profile__tenant__isnull=True)
             ).distinct()
         
-        # FIX: HEAD and SUBSCRIBER see ALL users in their tenant
         try:
             role = request.user.profile.role
             tenant = request.user.profile.tenant
@@ -73,7 +63,34 @@ class CustomUserAdmin(UserAdmin):
 
         return qs.filter(id=request.user.id).distinct()
 
+    # --- NEW: VISUALLY LOCK SUPERUSER FIELDS ---
+    def get_readonly_fields(self, request, obj=None):
+        readonly = list(super().get_readonly_fields(request, obj))
+        
+        # If the person logged in is NOT the master system owner...
+        if not request.user.is_superuser:
+            # Lock down these security fields so they cannot be clicked
+            if 'is_superuser' not in readonly: readonly.append('is_superuser')
+            if 'groups' not in readonly: readonly.append('groups')
+            if 'user_permissions' not in readonly: readonly.append('user_permissions')
+            
+        return tuple(readonly)
+
     def save_model(self, request, obj, form, change):
+        # --- NEW: HARD LOCK SUPERUSER STATUS IN DATABASE ---
+        
+        # 1. A non-superuser can NEVER grant superuser status
+        if not request.user.is_superuser:
+            obj.is_superuser = False
+            
+        # 2. Even if a true superuser is editing them, a tenant employee can NEVER be a superuser
+        try:
+            if hasattr(obj, 'profile') and obj.profile.tenant is not None:
+                obj.is_superuser = False
+        except Exception:
+            pass
+
+
         if change:
             old_user = User.objects.get(pk=obj.pk)
             if old_user.is_active and not obj.is_active:
@@ -82,7 +99,6 @@ class CustomUserAdmin(UserAdmin):
         super().save_model(request, obj, form, change)
 
         if not change: 
-            # FIX: Auto-assign the tenant so the user doesn't turn invisible!
             tenant = None
             if hasattr(request.user, 'profile'):
                 tenant = request.user.profile.tenant
