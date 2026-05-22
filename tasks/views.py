@@ -75,16 +75,20 @@ class TaskListCreateView(IsActiveSubscriberMixin, generics.ListCreateAPIView):
         role = user.profile.role
         tenant = user.profile.tenant
         
+        # 1. Gather the correct base tasks based on role
         if role in ['HEAD', 'SUBSCRIBER']:
-            return Task.objects.filter(owner__profile__tenant=tenant).order_by('-created_at')
+            qs = Task.objects.filter(owner__profile__tenant=tenant)
         elif role == 'SUP':
             subordinate_ids = Profile.objects.filter(assigned_supervisor=user, tenant=tenant).values_list('user_id', flat=True)
-            return Task.objects.filter(
+            qs = Task.objects.filter(
                 Q(owner__profile__tenant=tenant) & 
                 (Q(supervisor=user) | Q(owner=user) | Q(owner_id__in=subordinate_ids))
-            ).distinct().order_by('-created_at')
+            ).distinct()
         else:
-            return Task.objects.filter(owner=user, owner__profile__tenant=tenant).order_by('-created_at')
+            qs = Task.objects.filter(owner=user, owner__profile__tenant=tenant)
+
+        # 2. FIX: Fetch all related owners, supervisors, and notes in ONE query!
+        return qs.select_related('owner', 'supervisor', 'owner__profile').prefetch_related('notes').order_by('-created_at')
 
     def perform_create(self, serializer):
         user = self.request.user
