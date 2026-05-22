@@ -469,7 +469,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
                 tags.append("✈️ (ON LEAVE)")
             
             # --- FIX: Only flag users who are marked as staff ---
-            if t_user.is_staff and (not t_user.last_login or t_user.last_login < thirty_days_ago):
+            if t_user.is_staff and (not t_user.last_login or t_user.last_login < seven_days_ago):
                 tags.append("🔴 (INACTIVE)")
                 
             if tags:
