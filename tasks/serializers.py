@@ -25,7 +25,7 @@ class TaskSerializer(serializers.ModelSerializer):
     supervisor_name = serializers.ReadOnlyField(source='supervisor.username')
     notes = NoteSerializer(many=True, read_only=True)
     
-    # FIX 3: Force the owner field to be read-only so the frontend doesn't crash validation
+    # Ensures the frontend doesn't crash validation by sending empty owner fields
     owner = serializers.PrimaryKeyRelatedField(read_only=True)
     
     owner_name = serializers.ReadOnlyField(source='owner.username')
@@ -34,7 +34,23 @@ class TaskSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Task
-        fields = '__all__' # (Or whatever fields list you currently have here)
+        fields = '__all__'
+
+    # --- FIX: INTERCEPT FRONTEND STRINGIFIED NULLS ---
+    def to_internal_value(self, data):
+        # If the frontend sends FormData, it arrives as an immutable QueryDict.
+        # We temporarily unlock it to clean the data.
+        if hasattr(data, '_mutable'):
+            data._mutable = True
+            
+        # Catch React/Axios sending literal "null" text and convert it to real Python None
+        if data.get('supervisor') in ['null', 'undefined', '', 'None']:
+            data['supervisor'] = None
+            
+        if data.get('expected_completion_date') in ['null', 'undefined', '', 'None']:
+            data['expected_completion_date'] = None
+            
+        return super().to_internal_value(data)
 
 class ProfileSerializer(serializers.ModelSerializer):
     username = serializers.ReadOnlyField(source='user.username')

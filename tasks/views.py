@@ -35,12 +35,23 @@ class IsActiveSubscriberMixin:
         if not tenant:
             raise PermissionDenied("You do not belong to an active subscription/tenant.")
         
-        # FIX 1: Added .date() to timezone.now() to prevent the 500 TypeError crash!
-        if not tenant.is_active or (tenant.expiry_date and timezone.now().date() > tenant.expiry_date):
+        # --- FIX: BULLETPROOF DATE MATH ---
+        is_expired = False
+        if tenant.expiry_date:
+            exp_date = tenant.expiry_date
+            # Safely convert to a Date if it accidentally got saved as a DateTime
+            if isinstance(exp_date, datetime):
+                exp_date = exp_date.date()
+                
+            if timezone.now().date() > exp_date:
+                is_expired = True
+
+        if not tenant.is_active or is_expired:
             if tenant.is_active:  
                 tenant.is_active = False
                 tenant.save()
             raise PermissionDenied("Subscription expired or deactivated. Please renew.")
+
 
 class SubscriberCreateUserView(IsActiveSubscriberMixin, generics.CreateAPIView):
     serializer_class = TenantUserCreateSerializer
@@ -50,8 +61,7 @@ class SubscriberCreateUserView(IsActiveSubscriberMixin, generics.CreateAPIView):
         if request.user.profile.role != 'SUBSCRIBER':
             return Response({"error": "Only subscribers can create users."}, status=status.HTTP_403_FORBIDDEN)
         tenant = request.user.profile.tenant
-        current_users = Profile.objects.filter(tenant=tenant).count()
-        if current_users >= tenant.max_users:
+        if Profile.objects.filter(tenant=tenant).count() >= tenant.max_users:
             return Response({"error": f"Subscription limit reached ({tenant.max_users} users)."}, status=status.HTTP_403_FORBIDDEN)
         return super().create(request, *args, **kwargs)
 
@@ -76,10 +86,9 @@ class TaskListCreateView(IsActiveSubscriberMixin, generics.ListCreateAPIView):
         else:
             return Task.objects.filter(owner=user, owner__profile__tenant=tenant).order_by('-created_at')
 
-    # FIX 2: Moved the advanced role logic here so it catches tasks created from your urls.py route
     def perform_create(self, serializer):
         user = self.request.user
-        role = user.profile.role
+        role = getattr(user.profile, 'role', 'SUB')
         
         if role == 'SUB':
             assigned_sup = user.profile.assigned_supervisor
@@ -92,6 +101,7 @@ class TaskListCreateView(IsActiveSubscriberMixin, generics.ListCreateAPIView):
                 serializer.save(owner=user, supervisor=None)
         else:
             serializer.save(owner=user)
+
 
 class TaskRetrieveUpdateDestroyView(IsActiveSubscriberMixin, generics.RetrieveUpdateDestroyAPIView):
     serializer_class = TaskSerializer
