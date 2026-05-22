@@ -14,7 +14,6 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import HttpResponse
 
-# --- Native CSV & PDF Imports ---
 import csv
 from datetime import datetime, timedelta
 from reportlab.lib.pagesizes import letter
@@ -36,15 +35,13 @@ class IsActiveSubscriberMixin:
         if not tenant:
             raise PermissionDenied("You do not belong to an active subscription/tenant.")
         
-        if not tenant.is_active or (tenant.expiry_date and timezone.now() > tenant.expiry_date):
+        # FIX 1: Added .date() to timezone.now() to prevent the 500 TypeError crash!
+        if not tenant.is_active or (tenant.expiry_date and timezone.now().date() > tenant.expiry_date):
             if tenant.is_active:  
                 tenant.is_active = False
                 tenant.save()
             raise PermissionDenied("Subscription expired or deactivated. Please renew.")
 
-# ==========================================
-# SUBSCRIBER USER CREATION VIEW
-# ==========================================
 class SubscriberCreateUserView(IsActiveSubscriberMixin, generics.CreateAPIView):
     serializer_class = TenantUserCreateSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -59,9 +56,6 @@ class SubscriberCreateUserView(IsActiveSubscriberMixin, generics.CreateAPIView):
         return super().create(request, *args, **kwargs)
 
 
-# ==========================================
-# ORIGINAL VIEWS (UPDATED FOR TENANT ISOLATION)
-# ==========================================
 class TaskListCreateView(IsActiveSubscriberMixin, generics.ListCreateAPIView):
     serializer_class = TaskSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -82,8 +76,22 @@ class TaskListCreateView(IsActiveSubscriberMixin, generics.ListCreateAPIView):
         else:
             return Task.objects.filter(owner=user, owner__profile__tenant=tenant).order_by('-created_at')
 
+    # FIX 2: Moved the advanced role logic here so it catches tasks created from your urls.py route
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
+        user = self.request.user
+        role = user.profile.role
+        
+        if role == 'SUB':
+            assigned_sup = user.profile.assigned_supervisor
+            serializer.save(owner=user, supervisor=assigned_sup)
+        elif role in ['HEAD', 'SUBSCRIBER']:
+            assigned_sup_user = serializer.validated_data.get('supervisor')
+            if assigned_sup_user:
+                serializer.save(owner=assigned_sup_user, supervisor=user)
+            else:
+                serializer.save(owner=user, supervisor=None)
+        else:
+            serializer.save(owner=user)
 
 class TaskRetrieveUpdateDestroyView(IsActiveSubscriberMixin, generics.RetrieveUpdateDestroyAPIView):
     serializer_class = TaskSerializer

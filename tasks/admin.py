@@ -180,7 +180,7 @@ class ProfileAdmin(admin.ModelAdmin):
 # ==========================================
 class NoteInline(admin.TabularInline):
     model = Note
-    extra = 0
+    extra = 1
     readonly_fields = ('user', 'created_at')
 
     formfield_overrides = {

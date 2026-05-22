@@ -24,24 +24,17 @@ class TaskSerializer(serializers.ModelSerializer):
     )
     supervisor_name = serializers.ReadOnlyField(source='supervisor.username')
     notes = NoteSerializer(many=True, read_only=True)
+    
+    # FIX 3: Force the owner field to be read-only so the frontend doesn't crash validation
+    owner = serializers.PrimaryKeyRelatedField(read_only=True)
+    
     owner_name = serializers.ReadOnlyField(source='owner.username')
     owner_id = serializers.ReadOnlyField(source='owner.id')
     created_at = serializers.DateTimeField(format="%d %b %Y", read_only=True)
-    
-    # This provides the human-readable version of the status (e.g., "Cancelled")
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
 
     class Meta:
         model = Task
-        fields = ['id', 'title', 'description', 'owner_name', 'owner_id', 'supervisor_name',
-            'supervisor',
-            'supervisor_id',
-            'status',          # The code (NS, IP, CP, CN, PP)
-            'status_display',  # The readable name
-            'notes', 
-            'created_at', 
-            'expected_completion_date'
-        ]
+        fields = '__all__' # (Or whatever fields list you currently have here)
 
 class ProfileSerializer(serializers.ModelSerializer):
     username = serializers.ReadOnlyField(source='user.username')
