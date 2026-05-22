@@ -69,11 +69,11 @@
                                         <span class="text-xs font-bold px-2 py-1 bg-slate-100 text-slate-600 rounded ml-3 border border-slate-200">{{ task.status_display }}</span>
                                     </h3>
                                     
-                                    {% if not task.notes.all %}
+                                    {% if not task.notes %}
                                         <p class="text-xs text-slate-400 mt-3 italic bg-slate-50 p-2 rounded">No notes attached.</p>
                                     {% else %}
                                         <ul class="mt-4 space-y-2 pl-4 border-l-2 border-slate-200">
-                                        {% for note in task.notes.all %}
+                                        {% for note in task.notes %}
                                             <li class="text-sm text-slate-700">
                                                 <span class="font-bold text-slate-900">{{ note.user }}</span> 
                                                 <span class="text-xs text-slate-400 ml-1">({{ note.created_at }})</span>: 
