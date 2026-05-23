@@ -79,7 +79,7 @@ class TaskListCreateView(IsActiveSubscriberMixin, generics.ListCreateAPIView):
         if role in ['HEAD', 'SUBSCRIBER']:
             qs = Task.objects.filter(owner__profile__tenant=tenant)
         elif role == 'SUP':
-            subordinate_ids = Profile.objects.filter(assigned_supervisor=user, tenant=tenant).values_list('user_id', flat=True)
+            subordinate_ids = Profile.objects.filter(assigned_supervisors=user, tenant=tenant).values_list('user_id', flat=True)
             qs = Task.objects.filter(
                 Q(owner__profile__tenant=tenant) & 
                 (Q(supervisor=user) | Q(owner=user) | Q(owner_id__in=subordinate_ids))
@@ -119,7 +119,7 @@ class TaskRetrieveUpdateDestroyView(IsActiveSubscriberMixin, generics.RetrieveUp
         if role in ['HEAD', 'SUBSCRIBER']:
             return Task.objects.filter(owner__profile__tenant=tenant)
         elif role == 'SUP':
-            subordinate_ids = Profile.objects.filter(assigned_supervisor=user, tenant=tenant).values_list('user_id', flat=True)
+            subordinate_ids = Profile.objects.filter(assigned_supervisors=user, tenant=tenant).values_list('user_id', flat=True)
             return Task.objects.filter(
                 Q(owner__profile__tenant=tenant) & 
                 (Q(supervisor=user) | Q(owner=user) | Q(owner_id__in=subordinate_ids))
@@ -146,7 +146,7 @@ class TaskViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         if role in ['HEAD', 'SUBSCRIBER']:
             return Task.objects.filter(owner__profile__tenant=tenant).order_by('-created_at')
         elif role == 'SUP':
-            subordinate_ids = Profile.objects.filter(assigned_supervisor=user, tenant=tenant).values_list('user_id', flat=True)
+            subordinate_ids = Profile.objects.filter(assigned_supervisors=user, tenant=tenant).values_list('user_id', flat=True)
             return Task.objects.filter(
                 Q(owner__profile__tenant=tenant) & 
                 (Q(supervisor=user) | Q(owner=user) | Q(owner_id__in=subordinate_ids))
@@ -212,7 +212,7 @@ class TaskViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         if role in ['HEAD', 'SUBSCRIBER']:
             subs = User.objects.filter(profile__role='SUB', profile__tenant=tenant)
         elif role == 'SUP':
-            subs = User.objects.filter(profile__role='SUB', profile__assigned_supervisor=user, profile__tenant=tenant)
+            subs = User.objects.filter(profile__role='SUB', profile__assigned_supervisors=user, profile__tenant=tenant)
         else:
             return Response([])
         data = [{"id": u.id, "username": u.username} for u in subs]
@@ -288,7 +288,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             targets = User.objects.filter(profile__tenant=tenant)
         elif user.profile.role == 'SUP':
             targets = User.objects.filter(
-                Q(id=user.id) | Q(profile__assigned_supervisor=user), 
+                Q(id=user.id) | Q(profile__assigned_supervisors=user), 
                 profile__tenant=tenant
             )
         else:
@@ -359,7 +359,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             target_users = User.objects.filter(profile__tenant=tenant)
         else: 
             target_users = User.objects.filter(
-                Q(id=user.id) | Q(profile__assigned_supervisor=user), 
+                Q(id=user.id) | Q(profile__assigned_supervisors=user), 
                 profile__tenant=tenant
             )
 
@@ -587,7 +587,7 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
             sub_profile = Profile.objects.get(user_id=sub_id, role='SUB', tenant=tenant)
             sup_user = User.objects.get(id=sup_id, profile__role='SUP', profile__tenant=tenant)
             
-            sub_profile.assigned_supervisor = sup_user
+            sub_profile.assigned_supervisors.add(sup_user)
             sub_profile.save()
             
             return Response({"message": f"Success: {sub_profile.user.username} now reports to {sup_user.username}"})

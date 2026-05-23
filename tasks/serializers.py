@@ -56,11 +56,13 @@ class ProfileSerializer(serializers.ModelSerializer):
     username = serializers.ReadOnlyField(source='user.username')
     # Add this line to expose the User ID
     user_id = serializers.ReadOnlyField(source='user.id') 
+    #Handle multiple supervisors as a list of User IDs
+    assigned_supervisors = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
 
     class Meta:
         model = Profile
         # Add 'user_id' to the fields list
-        fields = ['id', 'user_id', 'username', 'role', 'assigned_supervisor', 'is_on_leave']
+        fields = ['id', 'user_id', 'username', 'role', 'assigned_supervisors', 'is_on_leave']
 
 class ChangePasswordSerializer(serializers.Serializer):
     old_password = serializers.CharField(required=True)

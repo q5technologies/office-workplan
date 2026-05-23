@@ -107,7 +107,7 @@ class CustomUserAdmin(UserAdmin):
             if role in ['SUBSCRIBER', 'HEAD']:
                 return qs.filter(profile__tenant=tenant).distinct()
             elif role == 'SUP':
-                return qs.filter(Q(id=request.user.id) | Q(profile__assigned_supervisor=request.user)).distinct()
+                return qs.filter(Q(id=request.user.id) | Q(profile__assigned_supervisors=request.user)).distinct()
         except:
             pass
         return qs.filter(id=request.user.id).distinct()
@@ -156,10 +156,15 @@ admin.site.register(User, CustomUserAdmin)
 
 @admin.register(Profile)
 class ProfileAdmin(admin.ModelAdmin):
-    list_display = ['user', 'role', 'tenant', 'assigned_supervisor', 'is_on_leave', 'created_by']
+    list_display = ['user', 'role', 'tenant', 'get_supervisors', 'is_on_leave', 'created_by']
     list_editable = ['is_on_leave'] 
     list_filter = ['is_on_leave', 'role']
     readonly_fields = ['created_by']
+
+    # FIX: Custom method to display all supervisors in a comma-separated list
+    def get_supervisors(self, obj):
+        return ", ".join([sup.username for sup in obj.assigned_supervisors.all()])
+    get_supervisors.short_description = 'Supervisors'
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -170,7 +175,8 @@ class ProfileAdmin(admin.ModelAdmin):
             if role in ['SUBSCRIBER', 'HEAD']:
                 return qs.filter(tenant=tenant)
             elif role == 'SUP':
-                return qs.filter(Q(user=request.user) | Q(assigned_supervisor=request.user))
+                # FIX: Check if the user is IN the assigned_supervisors list
+                return qs.filter(Q(user=request.user) | Q(assigned_supervisors=request.user)).distinct()
         except: pass
         return qs.filter(user=request.user)
 
@@ -216,7 +222,7 @@ class TaskAdmin(admin.ModelAdmin):
             elif role == 'SUP':
                 return qs.filter(
                     Q(owner__profile__tenant=tenant) &
-                    (Q(owner=request.user) | Q(supervisor=request.user) | Q(owner__profile__assigned_supervisor=request.user))
+                    (Q(owner=request.user) | Q(supervisor=request.user) | Q(owner__profile__assigned_supervisors=request.user))
                 ).distinct()
         except: pass
         return qs.filter(owner=request.user).distinct()
@@ -234,7 +240,7 @@ class TaskAdmin(admin.ModelAdmin):
                     kwargs["queryset"] = User.objects.filter(profile__tenant=tenant).distinct()
                 elif role == 'SUP':
                     kwargs["queryset"] = User.objects.filter(
-                        Q(id=request.user.id) | Q(profile__assigned_supervisor=request.user)
+                        Q(id=request.user.id) | Q(profile__assigned_supervisors=request.user)
                     ).distinct()
                 else:
                     kwargs["queryset"] = User.objects.filter(id=request.user.id)
@@ -290,7 +296,7 @@ class NoteAdmin(admin.ModelAdmin):
             elif role == 'SUP':
                 return qs.filter(
                     Q(task__owner__profile__tenant=tenant) &
-                    (Q(task__owner=request.user) | Q(task__supervisor=request.user) | Q(task__owner__profile__assigned_supervisor=request.user))
+                    (Q(task__owner=request.user) | Q(task__supervisor=request.user) | Q(task__owner__profile__assigned_supervisors=request.user))
                 ).distinct()
         except: pass
         return qs.filter(user=request.user).distinct()

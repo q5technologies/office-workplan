@@ -65,9 +65,8 @@ class Profile(models.Model):
         related_name='members'
     )
     
-    assigned_supervisor = models.ForeignKey(
-        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='my_subordinates'
-    )
+    assigned_supervisors = models.ManyToManyField(User, related_name='supervised_profiles', blank=True)
+    
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_profiles'
     )
