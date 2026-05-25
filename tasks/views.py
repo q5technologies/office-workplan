@@ -13,7 +13,8 @@ from .serializers import TaskSerializer, NoteSerializer, ProfileSerializer, Chan
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpResponseForbidden
+from django.contrib.auth.decorators import login_required
 
 import csv
 from datetime import datetime, timedelta
@@ -667,3 +668,54 @@ class SupervisorRatingView(IsActiveSubscriberMixin, APIView):
         results.sort(key=lambda x: x['compliance_score'], reverse=True)
         
         return Response(results)
+
+
+# ==========================================
+# NEW HTML VIEW: SUPERVISOR COMPLIANCE REPORT
+# ==========================================
+@login_required
+def supervisor_report_view(request):
+    """Generates the HTML webpage for the Supervisor Compliance Report"""
+    tenant = request.user.profile.tenant
+    role = request.user.profile.role
+
+    # Security check
+    if role not in ['HEAD', 'SUBSCRIBER', 'SUP']:
+        return HttpResponseForbidden("<h2>Unauthorized to view supervisor ratings.</h2>")
+
+    seven_days_ago = timezone.now() - timedelta(days=7)
+
+    if role == 'SUP':
+        supervisors = User.objects.filter(id=request.user.id)
+    else:
+        supervisors = User.objects.filter(profile__role='SUP', profile__tenant=tenant)
+
+    results = []
+    for sup in supervisors:
+        subs = Profile.objects.filter(assigned_supervisors=sup, tenant=tenant)
+        sub_count = subs.count()
+        if sub_count == 0: continue
+
+        target_notes = sub_count * 2
+        sub_users = subs.values_list('user', flat=True)
+
+        notes_count = Note.objects.filter(
+            task__owner__in=sub_users,
+            user=sup,
+            created_at__gte=seven_days_ago
+        ).count()
+
+        score = min(100, int((notes_count / target_notes) * 100))
+
+        results.append({
+            "supervisor_name": sup.username,
+            "subordinate_count": sub_count,
+            "notes_left": notes_count,
+            "target_notes": target_notes,
+            "compliance_score": score
+        })
+
+    # Sort from best to worst
+    results.sort(key=lambda x: x['compliance_score'], reverse=True)
+    
+    return render(request, 'supervisor_report.html', {'results': results})

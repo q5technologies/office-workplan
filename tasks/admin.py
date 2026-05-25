@@ -156,6 +156,7 @@ admin.site.register(User, CustomUserAdmin)
 
 @admin.register(Profile)
 class ProfileAdmin(admin.ModelAdmin):
+    change_list_template = 'admin_profile_changelist.html'
     list_display = ['user', 'role', 'tenant', 'get_supervisors', 'is_on_leave', 'created_by']
     list_editable = ['is_on_leave'] 
     list_filter = ['is_on_leave', 'role']
