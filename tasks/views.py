@@ -95,7 +95,11 @@ class TaskListCreateView(IsActiveSubscriberMixin, generics.ListCreateAPIView):
         role = getattr(user.profile, 'role', 'SUB')
         
         if role == 'SUB':
-            assigned_sup = user.profile.assigned_supervisor
+            # FIX: Get the first supervisor in the list to act as the default task supervisor
+            default_sup = user.profile.assigned_supervisors.first()
+            
+            # If the frontend sent a specific supervisor, use it, otherwise use the default
+            assigned_sup = serializer.validated_data.get('supervisor', default_sup)
             serializer.save(owner=user, supervisor=assigned_sup)
         elif role in ['HEAD', 'SUBSCRIBER']:
             assigned_sup_user = serializer.validated_data.get('supervisor')

@@ -193,6 +193,17 @@ class NoteInline(admin.TabularInline):
         models.TextField: {'widget': AutoResizeTextarea},
     }
 
+    # --- NEW: IMMUTABLE INLINE NOTES ---
+    def has_change_permission(self, request, obj=None):
+        # Returning False makes existing notes read-only plain text.
+        # It still allows the blank "extra" row at the bottom for adding new notes!
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        # This completely hides the "Delete" checkbox on inline notes.
+        return False
+
+
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
     list_display = ('title', 'owner', 'supervisor', 'status', 'created_at')
@@ -222,7 +233,7 @@ class TaskAdmin(admin.ModelAdmin):
             elif role == 'SUP':
                 return qs.filter(
                     Q(owner__profile__tenant=tenant) &
-                    (Q(owner=request.user) | Q(supervisor=request.user) | Q(owner__profile__assigned_supervisors=request.user))
+                    (Q(owner=request.user) | Q(supervisor=request.user) | Q(owner__profile__assigned_supervisor=request.user))
                 ).distinct()
         except: pass
         return qs.filter(owner=request.user).distinct()
@@ -240,7 +251,7 @@ class TaskAdmin(admin.ModelAdmin):
                     kwargs["queryset"] = User.objects.filter(profile__tenant=tenant).distinct()
                 elif role == 'SUP':
                     kwargs["queryset"] = User.objects.filter(
-                        Q(id=request.user.id) | Q(profile__assigned_supervisors=request.user)
+                        Q(id=request.user.id) | Q(profile__assigned_supervisor=request.user)
                     ).distinct()
                 else:
                     kwargs["queryset"] = User.objects.filter(id=request.user.id)
@@ -259,10 +270,6 @@ class TaskAdmin(admin.ModelAdmin):
 class NoteAdmin(admin.ModelAdmin):
     list_display = ('task_link', 'text', 'user', 'created_at')
     list_display_links = ('text',) 
-
-    formfield_overrides = {
-        models.TextField: {'widget': AutoResizeTextarea},
-    }
     
     def task_link(self, obj):
         url = reverse('admin:tasks_task_change', args=[obj.task.id])
@@ -278,6 +285,18 @@ class NoteAdmin(admin.ModelAdmin):
         if not obj.pk: 
             obj.user = request.user
         super().save_model(request, obj, form, change)
+
+    # --- NEW: IMMUTABLE STANDALONE NOTES ---
+    def has_change_permission(self, request, obj=None):
+        # If the object already exists (editing), deny permission.
+        # Django will automatically hide the "Save" buttons and lock all fields.
+        if obj is not None:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        # Completely removes the red "Delete" button
+        return False
 
     list_filter = (
         ('user', admin.RelatedOnlyFieldListFilter), 
@@ -296,7 +315,7 @@ class NoteAdmin(admin.ModelAdmin):
             elif role == 'SUP':
                 return qs.filter(
                     Q(task__owner__profile__tenant=tenant) &
-                    (Q(task__owner=request.user) | Q(task__supervisor=request.user) | Q(task__owner__profile__assigned_supervisors=request.user))
+                    (Q(task__owner=request.user) | Q(task__supervisor=request.user) | Q(task__owner__profile__assigned_supervisor=request.user))
                 ).distinct()
         except: pass
         return qs.filter(user=request.user).distinct()
