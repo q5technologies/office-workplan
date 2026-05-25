@@ -43,3 +43,6 @@ class Note(models.Model):
     def __str__(self):
         return f"Note by {self.user.username} on {self.task.title}"
     
+    class Meta:
+        ordering = ['created_at']  # Oldest notes first
+    
