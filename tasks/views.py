@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied 
+from rest_framework.views import APIView
 from django.db.models import Q, Prefetch
 from django.utils import timezone 
 from .models import Task, Note
@@ -605,3 +606,64 @@ class ProfileViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         
 def index_view(request):
     return render(request, 'index.html')
+
+class SupervisorRatingView(IsActiveSubscriberMixin, APIView):
+    """
+    Calculates a rolling 7-day compliance score for supervisors.
+    Target: 2 notes left per subordinate per week.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        tenant = request.user.profile.tenant
+        role = request.user.profile.role
+
+        # Security: HEAD and SUBSCRIBER see the whole company. A SUP only sees their own score.
+        if role not in ['HEAD', 'SUBSCRIBER', 'SUP']:
+            return Response({"error": "Unauthorized to view supervisor ratings."}, status=status.HTTP_403_FORBIDDEN)
+
+        # We use a rolling 7-day window so scores don't drop to 0% every Monday morning
+        seven_days_ago = timezone.now() - timedelta(days=7)
+
+        if role == 'SUP':
+            supervisors = User.objects.filter(id=request.user.id)
+        else:
+            supervisors = User.objects.filter(profile__role='SUP', profile__tenant=tenant)
+
+        results = []
+        for sup in supervisors:
+            # Find everyone who reports to this supervisor (This perfectly handles SUPs managing other SUPs!)
+            subs = Profile.objects.filter(assigned_supervisors=sup, tenant=tenant)
+            sub_count = subs.count()
+
+            # If they don't manage anyone, skip them
+            if sub_count == 0:
+                continue
+
+            # Target: 2 notes per subordinate per week
+            target_notes = sub_count * 2
+            sub_users = subs.values_list('user', flat=True)
+
+            # Count notes written by THIS supervisor on their subordinates' tasks in the last 7 days
+            notes_count = Note.objects.filter(
+                task__owner__in=sub_users,
+                user=sup,
+                created_at__gte=seven_days_ago
+            ).count()
+
+            # Calculate score percentage (capped at 100%)
+            score = min(100, int((notes_count / target_notes) * 100))
+
+            results.append({
+                "supervisor_id": sup.id,
+                "supervisor_name": sup.username,
+                "subordinate_count": sub_count,
+                "notes_left_this_week": notes_count,
+                "target_notes": target_notes,
+                "compliance_score": score
+            })
+
+        # Sort the leaderboard from best to worst performing supervisor
+        results.sort(key=lambda x: x['compliance_score'], reverse=True)
+        
+        return Response(results)
