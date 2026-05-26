@@ -19,9 +19,10 @@ from django.urls import path, include
 from rest_framework.authtoken import views as auth_views # Added 'as auth_views'
 from users.views import get_user_profile # Import the new view
 from rest_framework.routers import DefaultRouter
-from tasks.views import TaskViewSet, NoteCreateView, TaskListCreateView, ProfileViewSet, index_view, supervisor_report_view, SupervisorRatingView 
+from tasks.views import TaskViewSet, NoteCreateView, TaskListCreateView, ProfileViewSet, index_view, supervisor_report_view, SupervisorRatingView, ObjectiveViewSet
 router = DefaultRouter()
 router.register(r'tasks', TaskViewSet, basename='task')
+router.register(r'objectives', ObjectiveViewSet, basename='objective') 
 router.register(r'profiles', ProfileViewSet, basename='profile')
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -36,6 +37,7 @@ urlpatterns = [
     path('supervisor-report/', supervisor_report_view, name='supervisor-report'),
     path('supervisor-ratings/', SupervisorRatingView.as_view(), name='supervisor-ratings'),
 ]
+urlpatterns += router.urls
 
 admin.site.site_header = "Office Workplan"
 admin.site.site_title = "Office Workplan Portal"

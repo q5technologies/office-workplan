@@ -7,9 +7,9 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.views import APIView
 from django.db.models import Q, Prefetch
 from django.utils import timezone 
-from .models import Task, Note
-from users.models import Profile, Subscription 
-from .serializers import TaskSerializer, NoteSerializer, ProfileSerializer, ChangePasswordSerializer, TenantUserCreateSerializer
+from .models import Task, Note, Objective
+from users.models import Profile, Subscription
+from .serializers import TaskSerializer, NoteSerializer, ProfileSerializer, ChangePasswordSerializer, TenantUserCreateSerializer, ObjectiveSerializer
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist
@@ -81,10 +81,10 @@ class TaskListCreateView(IsActiveSubscriberMixin, generics.ListCreateAPIView):
         if role in ['HEAD', 'SUBSCRIBER']:
             qs = Task.objects.filter(owner__profile__tenant=tenant)
         elif role == 'SUP':
-            subordinate_ids = Profile.objects.filter(assigned_supervisors=user, tenant=tenant).values_list('user_id', flat=True)
+            # FIX: Use the direct Many-to-Many join to find subordinates in a single query
             qs = Task.objects.filter(
                 Q(owner__profile__tenant=tenant) & 
-                (Q(supervisor=user) | Q(owner=user) | Q(owner_id__in=subordinate_ids))
+                (Q(supervisor=user) | Q(owner=user) | Q(owner__profile__assigned_supervisors=user))
             ).distinct()
         else:
             qs = Task.objects.filter(owner=user, owner__profile__tenant=tenant)
@@ -151,14 +151,17 @@ class TaskViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
 
         if role in ['HEAD', 'SUBSCRIBER']:
             return Task.objects.filter(owner__profile__tenant=tenant).order_by('-created_at')
+        
         elif role == 'SUP':
-            subordinate_ids = Profile.objects.filter(assigned_supervisors=user, tenant=tenant).values_list('user_id', flat=True)
+            # FIX: Use the direct Many-to-Many join to find subordinates in a single query
             return Task.objects.filter(
                 Q(owner__profile__tenant=tenant) & 
-                (Q(supervisor=user) | Q(owner=user) | Q(owner_id__in=subordinate_ids))
+                (Q(supervisor=user) | Q(owner=user) | Q(owner__profile__assigned_supervisors=user))
             ).distinct().order_by('-created_at')
+            
         elif role == 'SUB':
             return Task.objects.filter(owner=user, owner__profile__tenant=tenant).order_by('-created_at')
+            
         return Task.objects.none()
 
     def perform_create(self, serializer):
@@ -719,3 +722,59 @@ def supervisor_report_view(request):
     results.sort(key=lambda x: x['compliance_score'], reverse=True)
     
     return render(request, 'supervisor_report.html', {'results': results})
+
+class ObjectiveViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
+    serializer_class = ObjectiveSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        role = user.profile.role
+        tenant = user.profile.tenant 
+
+        if role in ['HEAD', 'SUBSCRIBER']:
+            return Objective.objects.filter(owner__profile__tenant=tenant).order_by('-created_at')
+        elif role == 'SUP':
+            subordinate_ids = Profile.objects.filter(assigned_supervisors=user, tenant=tenant).values_list('user_id', flat=True)
+            return Objective.objects.filter(
+                Q(owner__profile__tenant=tenant) & 
+                (Q(owner=user) | Q(owner_id__in=subordinate_ids))
+            ).distinct().order_by('-created_at')
+        elif role == 'SUB':
+            return Objective.objects.filter(owner=user, owner__profile__tenant=tenant).order_by('-created_at')
+        return Objective.objects.none()
+
+    # --- FIX: HIERARCHY-AWARE CREATION LOGIC ---
+    def perform_create(self, serializer):
+        user = self.request.user
+        role = user.profile.role
+        tenant = user.profile.tenant
+        
+        # Did the frontend request to assign this objective to someone specific?
+        assigned_owner_id = serializer.validated_data.pop('owner_id', None)
+        
+        # If they requested someone else, verify permissions!
+        if assigned_owner_id and str(assigned_owner_id) != str(user.id):
+            try:
+                assigned_owner = User.objects.get(id=assigned_owner_id, profile__tenant=tenant)
+                
+                if role in ['HEAD', 'SUBSCRIBER']:
+                    # Heads can assign to anyone
+                    serializer.save(owner=assigned_owner)
+                    
+                elif role == 'SUP':
+                    # Supervisors must verify the target is actually their subordinate
+                    is_subordinate = Profile.objects.filter(user=assigned_owner, assigned_supervisors=user).exists()
+                    if is_subordinate:
+                        serializer.save(owner=assigned_owner)
+                    else:
+                        raise PermissionDenied("You can only assign objectives to your direct subordinates.")
+                        
+                else:
+                    raise PermissionDenied("Subordinates cannot assign objectives to others.")
+                    
+            except User.DoesNotExist:
+                raise PermissionDenied("User not found in your organization.")
+        else:
+            # Default fallback: You are creating the objective for yourself
+            serializer.save(owner=user)

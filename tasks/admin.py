@@ -9,7 +9,7 @@ from django.utils.safestring import mark_safe
 from django.utils.html import format_html
 from django.urls import reverse
 
-from .models import Task, Note
+from .models import Task, Note, Objective
 from users.models import Profile, Subscription
 
 # ==========================================
@@ -221,6 +221,10 @@ class NoteInline(admin.TabularInline):
         models.TextField: {'widget': AutoResizeTextarea},
     }
 
+    # Restrict notes to only show notes for the specific task
+    def get_queryset(self, request):
+        return super().get_queryset(request).order_by('-created_at')
+
     # --- NEW: IMMUTABLE INLINE NOTES ---
     def has_change_permission(self, request, obj=None):
         # Returning False makes existing notes read-only plain text.
@@ -230,6 +234,43 @@ class NoteInline(admin.TabularInline):
     def has_delete_permission(self, request, obj=None):
         # This completely hides the "Delete" checkbox on inline notes.
         return False
+
+class TaskInline(admin.TabularInline):
+    model = Task
+    extra = 0
+    readonly_fields = ('display_notes',)
+
+    def display_notes(self, obj):
+        # This shows a preview of notes directly in the task row
+        notes = obj.notes.all().order_by('-created_at')[:3]
+        return mark_safe("<br>".join([f"<b>{n.user.username}:</b> {n.text}" for n in notes]))
+    display_notes.short_description = "Recent Notes"
+    
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        # 1. Allow superusers to see everything
+        if request.user.is_superuser:
+            if db_field.name in ["owner", "supervisor"]:
+                kwargs["queryset"] = User.objects.all()
+            return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+        # 2. Restrict regular users to their own tenant
+        if db_field.name in ["owner", "supervisor"]:
+            try:
+                role = request.user.profile.role
+                tenant = request.user.profile.tenant
+                
+                if role in ['SUBSCRIBER', 'HEAD']:
+                    kwargs["queryset"] = User.objects.filter(profile__tenant=tenant).distinct()
+                elif role == 'SUP':
+                    # Support for the multiple-supervisor structure
+                    subordinate_ids = Profile.objects.filter(assigned_supervisors=request.user, tenant=tenant).values_list('user_id', flat=True)
+                    kwargs["queryset"] = User.objects.filter(Q(id=request.user.id) | Q(id__in=subordinate_ids)).distinct()
+                else:
+                    kwargs["queryset"] = User.objects.filter(id=request.user.id)
+            except Exception:
+                kwargs["queryset"] = User.objects.none()
+                    
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
 @admin.register(Task)
@@ -252,7 +293,9 @@ class TaskAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        if request.user.is_superuser: return qs.none()
+        if request.user.is_superuser:
+            return qs 
+            
         try:
             role = request.user.profile.role
             tenant = request.user.profile.tenant
@@ -261,14 +304,20 @@ class TaskAdmin(admin.ModelAdmin):
             elif role == 'SUP':
                 return qs.filter(
                     Q(owner__profile__tenant=tenant) &
-                    (Q(owner=request.user) | Q(supervisor=request.user) | Q(owner__profile__assigned_supervisor=request.user))
+                    # FIX: Plural 'assigned_supervisors'
+                    (Q(owner=request.user) | Q(supervisor=request.user) | Q(owner__profile__assigned_supervisors=request.user))
                 ).distinct()
-        except: pass
-        return qs.filter(owner=request.user).distinct()
+            elif role == 'SUB':
+                return qs.filter(owner=request.user).distinct()
+        except Exception:
+            pass
+        return qs.none()
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        # 1. FIX: Allow Superusers to see all users instead of an empty list
         if request.user.is_superuser:
-            kwargs["queryset"] = User.objects.none() 
+            if db_field.name in ["owner", "supervisor"]:
+                kwargs["queryset"] = User.objects.all() 
             return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
         if db_field.name in ["owner", "supervisor"]:
@@ -278,12 +327,13 @@ class TaskAdmin(admin.ModelAdmin):
                 if role in ['SUBSCRIBER', 'HEAD']:
                     kwargs["queryset"] = User.objects.filter(profile__tenant=tenant).distinct()
                 elif role == 'SUP':
+                    # 2. FIX: Updated to 'assigned_supervisors' to support the new multiple-supervisor database structure
                     kwargs["queryset"] = User.objects.filter(
-                        Q(id=request.user.id) | Q(profile__assigned_supervisor=request.user)
+                        Q(id=request.user.id) | Q(profile__assigned_supervisors=request.user)
                     ).distinct()
                 else:
                     kwargs["queryset"] = User.objects.filter(id=request.user.id)
-            except:
+            except Exception:
                 kwargs["queryset"] = User.objects.none()
 
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
@@ -296,8 +346,14 @@ class TaskAdmin(admin.ModelAdmin):
 
 @admin.register(Note)
 class NoteAdmin(admin.ModelAdmin):
-    list_display = ('task_link', 'text', 'user', 'created_at')
+    list_display = ('objective_link', 'task_link', 'text', 'user', 'created_at')
     list_display_links = ('text',) 
+    
+    def objective_link(self, obj):
+            url = reverse('admin:tasks_objective_change', args=[obj.task.objective.id])
+            return format_html('<a href="{}" style="color: #2563eb; font-weight: bold;">{}</a>', url, obj.task.objective.title)
+    objective_link.short_description = 'Objective'
+    objective_link.admin_order_field = 'task__objective__title'
     
     def task_link(self, obj):
         url = reverse('admin:tasks_task_change', args=[obj.task.id])
@@ -334,7 +390,9 @@ class NoteAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        if request.user.is_superuser: return qs.none()
+        if request.user.is_superuser:
+            return qs 
+            
         try:
             role = request.user.profile.role
             tenant = request.user.profile.tenant
@@ -343,7 +401,70 @@ class NoteAdmin(admin.ModelAdmin):
             elif role == 'SUP':
                 return qs.filter(
                     Q(task__owner__profile__tenant=tenant) &
-                    (Q(task__owner=request.user) | Q(task__supervisor=request.user) | Q(task__owner__profile__assigned_supervisor=request.user))
+                    # FIX: Plural 'assigned_supervisors'
+                    (Q(task__owner=request.user) | Q(task__supervisor=request.user) | Q(task__owner__profile__assigned_supervisors=request.user))
                 ).distinct()
-        except: pass
-        return qs.filter(user=request.user).distinct()
+            elif role == 'SUB':
+                return qs.filter(task__owner=request.user).distinct()
+        except Exception:
+            pass
+        return qs.none()
+    
+@admin.register(Objective)
+class ObjectiveAdmin(admin.ModelAdmin):
+    list_display = ['title', 'owner', 'target_number', 'created_at']
+    list_filter = ['created_at']
+    search_fields = ['title']
+    inlines = [TaskInline]
+
+    formfield_overrides = {
+        models.TextField: {'widget': AutoResizeTextarea},
+    }
+
+    # 1. Filter the main table so users only see what they are allowed to see
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs 
+
+        try:
+            role = request.user.profile.role
+            tenant = request.user.profile.tenant
+            if role in ['HEAD', 'SUBSCRIBER']:
+                return qs.filter(owner__profile__tenant=tenant)
+            elif role == 'SUP':
+                subordinate_ids = Profile.objects.filter(assigned_supervisors=request.user, tenant=tenant).values_list('user_id', flat=True)
+                return qs.filter(Q(owner=request.user) | Q(owner_id__in=subordinate_ids)).distinct()
+            elif role == 'SUB':
+                return qs.filter(owner=request.user)
+        except Exception:
+            pass
+        return qs.none()
+
+    # 2. Secure the "Owner" dropdown so they can only assign objectives to allowed people
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "owner" and not request.user.is_superuser:
+            try:
+                role = request.user.profile.role
+                tenant = request.user.profile.tenant
+                if role in ['HEAD', 'SUBSCRIBER']:
+                    # Heads can pick anyone in the company
+                    kwargs["queryset"] = User.objects.filter(profile__tenant=tenant)
+                elif role == 'SUP':
+                    # Supervisors can pick themselves or their direct subordinates
+                    subordinate_ids = Profile.objects.filter(assigned_supervisors=request.user, tenant=tenant).values_list('user_id', flat=True)
+                    kwargs["queryset"] = User.objects.filter(Q(id=request.user.id) | Q(id__in=subordinate_ids)).distinct()
+                else:
+                    # Subordinates can only pick themselves
+                    kwargs["queryset"] = User.objects.filter(id=request.user.id)
+            except Exception:
+                kwargs["queryset"] = User.objects.none()
+                
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    # 3. FIX: Instantly force the Objectives menu to appear for everyone
+    def has_module_permission(self, request): return True
+    def has_view_permission(self, request, obj=None): return True
+    def has_add_permission(self, request): return True
+    def has_change_permission(self, request, obj=None): return True
+    def has_delete_permission(self, request, obj=None): return True

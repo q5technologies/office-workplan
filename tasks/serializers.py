@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Task, Note, User
+from .models import Task, Note, User, Objective
 from users.models import Profile, Subscription
 from django.contrib.auth.models import User
 
@@ -13,9 +13,32 @@ class NoteSerializer(serializers.ModelSerializer):
         model = Note 
         fields = ['id', 'task', 'user', 'text', 'created_at']
 
+class ObjectiveSerializer(serializers.ModelSerializer):
+    owner_name = serializers.ReadOnlyField(source='owner.username')
+
+    # This automatically counts how many tasks are attached to this objective
+    tasks_count = serializers.SerializerMethodField()
+    # --- Allow frontends to send an 'owner_id' to assign it to someone else ---
+    owner_id = serializers.IntegerField(write_only=True, required=False)
+
+    class Meta:
+        model = Objective
+        fields = ['id', 'title', 'description', 'owner', 'owner_name', 'target_number', 'tasks_count', 'created_at']
+        read_only_fields = ['owner']
+
+    def get_tasks_count(self, obj):
+        return obj.tasks.count()
+
 
 class TaskSerializer(serializers.ModelSerializer):
     description = serializers.CharField(required=False, allow_blank=True)
+    # --- NEW: Objective Fields ---
+    objective = serializers.PrimaryKeyRelatedField(
+        queryset=Objective.objects.all(), 
+        required=False, 
+        allow_null=True
+    )
+    objective_title = serializers.ReadOnlyField(source='objective.title')
     supervisor_id = serializers.ReadOnlyField(source='supervisor.id')
     supervisor = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.all(), 
