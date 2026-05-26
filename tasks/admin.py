@@ -155,6 +155,14 @@ class CustomUserAdmin(UserAdmin):
             tenant = request.user.profile.tenant if hasattr(request.user, 'profile') else None
             Profile.objects.filter(user=obj).update(created_by=request.user, tenant=tenant)
 
+        # --- NEW FIX: Automatically assign SUBSCRIBER role if created by Superuser ---
+        if request.user.is_superuser and not obj.is_superuser:
+            profile, created = Profile.objects.get_or_create(user=obj)
+            
+            if profile.role != 'SUBSCRIBER':
+                profile.role = 'SUBSCRIBER'
+                profile.save()
+
 admin.site.unregister(User)
 admin.site.register(User, CustomUserAdmin)
 
