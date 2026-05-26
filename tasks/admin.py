@@ -57,6 +57,11 @@ class SubscriptionAdmin(admin.ModelAdmin):
     list_filter = ('is_active',)
     search_fields = ('name', 'owner__username')
 
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if request.user.is_superuser and db_field.name == "owner":
+            # Only allow subscriptions to be owned by actual Subscribers
+            kwargs["queryset"] = User.objects.filter(profile__role='SUBSCRIBER')
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 # ==========================================
 # SECURE GROUP MANAGEMENT
@@ -182,6 +187,18 @@ class ProfileAdmin(admin.ModelAdmin):
                 return qs.filter(Q(user=request.user) | Q(assigned_supervisors=request.user)).distinct()
         except: pass
         return qs.filter(user=request.user)
+    
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if request.user.is_superuser and db_field.name == "user":
+            # Only show Subscribers and Superusers in the User dropdown
+            kwargs["queryset"] = User.objects.filter(Q(profile__role='SUBSCRIBER') | Q(is_superuser=True)).distinct()
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        if request.user.is_superuser and db_field.name == "assigned_supervisors":
+            # Only show Subscribers in the Supervisors list
+            kwargs["queryset"] = User.objects.filter(profile__role='SUBSCRIBER')
+        return super().formfield_for_manytomany(db_field, request, **kwargs)
 
 
 # ==========================================
