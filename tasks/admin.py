@@ -169,7 +169,9 @@ class ProfileAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        if request.user.is_superuser: return qs
+        if request.user.is_superuser: 
+            #Superusers ONLY see Subscribers and their own profile
+            return qs.filter(Q(role='SUBSCRIBER') | Q(user=request.user)).distinct()
         try:
             role = request.user.profile.role
             tenant = request.user.profile.tenant
