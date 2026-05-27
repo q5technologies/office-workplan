@@ -4,14 +4,27 @@ from users.models import Profile, Subscription
 from django.contrib.auth.models import User
 
 class NoteSerializer(serializers.ModelSerializer):
-    # Change task to read_only=True
     task = serializers.PrimaryKeyRelatedField(read_only=True)
     user = serializers.StringRelatedField(read_only=True)
     created_at = serializers.DateTimeField(format="%d %b, %H:%M", read_only=True)
+    
+    # --- NEW: Allow the mobile app to send an ID to reply to ---
+    reply_to_id = serializers.PrimaryKeyRelatedField(
+        queryset=Note.objects.all(), source='reply_to', required=False, allow_null=True, write_only=True
+    )
+    
+    # --- NEW: Recursively fetch nested replies ---
+    replies = serializers.SerializerMethodField()
 
     class Meta:
         model = Note 
-        fields = ['id', 'task', 'user', 'text', 'created_at']
+        fields = ['id', 'task', 'user', 'text', 'created_at', 'reply_to_id', 'replies']
+
+    def get_replies(self, obj):
+        # If this note has replies, serialize them and send them inside this note!
+        if obj.replies.exists():
+            return NoteSerializer(obj.replies.all().order_by('created_at'), many=True).data
+        return []
 
 class ObjectiveSerializer(serializers.ModelSerializer):
     owner_name = serializers.ReadOnlyField(source='owner.username')
@@ -61,6 +74,7 @@ class TaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = Task
         fields = '__all__'
+
 
     # --- FIX: INTERCEPT FRONTEND STRINGIFIED NULLS ---
     def to_internal_value(self, data):

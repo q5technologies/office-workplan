@@ -214,7 +214,8 @@ class ProfileAdmin(admin.ModelAdmin):
 # ==========================================
 class NoteInline(admin.TabularInline):
     model = Note
-    extra = 1
+    extra = 0
+    fields = ('user', 'text', 'created_at')
     readonly_fields = ('user', 'created_at')
 
     formfield_overrides = {
@@ -248,22 +249,32 @@ class TaskInline(admin.StackedInline): # <--- FIX: Changed from TabularInline to
     readonly_fields = ('display_notes',)
 
     def display_notes(self, obj):
-        # If it's a brand new blank row, don't try to load notes
         if not obj.pk:
             return "Save this task first to add and view notes."
             
-        notes = obj.notes.all().order_by('-created_at') # Grabs the 5 most recent notes
+        # --- FIX: Only fetch top-level notes for the initial loop ---
+        top_notes = obj.notes.filter(reply_to__isnull=True).order_by('-created_at') # Limit to 5 most recent top-level notes
         
-        if not notes:
+        if not top_notes:
             return "No notes yet."
             
-        # Build a beautiful, distinct HTML box for the notes under the task
         html = "<div style='background-color: #f8fafc; padding: 15px; border-radius: 6px; border: 1px solid #e2e8f0; margin-top: 5px;'>"
-        for n in notes:
+        for n in top_notes:
+            # Top Level Note
             html += f"<div style='margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;'>"
             html += f"<strong style='color: #2563eb;'>{n.user.username}</strong> "
             html += f"<span style='color: #64748b; font-size: 11px; margin-left: 5px;'>({n.created_at.strftime('%d %b %Y, %H:%M')})</span><br>"
             html += f"<span style='color: #334155; font-size: 13px;'>{n.text}</span>"
+            
+            # --- NEW: Nested Replies Loop ---
+            # Order replies oldest to newest so they read like a chat history
+            for reply in n.replies.all().order_by('created_at'):
+                html += f"<div style='margin-top: 8px; margin-left: 20px; padding-left: 10px; border-left: 2px solid #cbd5e1;'>"
+                html += f"<strong style='color: #0f766e;'>{reply.user.username}</strong> "
+                html += f"<span style='color: #64748b; font-size: 11px; margin-left: 5px;'>({reply.created_at.strftime('%d %b %Y, %H:%M')})</span><br>"
+                html += f"<span style='color: #475569; font-size: 13px;'>{reply.text}</span>"
+                html += "</div>"
+                
             html += "</div>"
         html += "</div>"
         
@@ -315,6 +326,7 @@ class TaskAdmin(admin.ModelAdmin):
         formset.save_m2m()
 
     def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related('notes', 'notes__user')
         qs = super().get_queryset(request)
         if request.user.is_superuser:
             return qs 
@@ -369,22 +381,27 @@ class TaskAdmin(admin.ModelAdmin):
 
 @admin.register(Note)
 class NoteAdmin(admin.ModelAdmin):
-    list_display = ('objective_link', 'task_link', 'text', 'user', 'created_at')
-    list_display_links = ('text',) 
+    # Safe list display without URL routing lookups
+    list_display = ('get_objective', 'get_task', 'text', 'user', 'created_at')
+    list_display_links = ('text',) # Make the note text the clickable link to edit
     
-    def objective_link(self, obj):
-            url = reverse('admin:tasks_objective_change', args=[obj.task.objective.id])
-            return format_html('<a href="{}" style="color: #2563eb; font-weight: bold;">{}</a>', url, obj.task.objective.title)
-    objective_link.short_description = 'Objective'
-    objective_link.admin_order_field = 'task__objective__title'
+    # 1. Safely grab the Objective Title
+    def get_objective(self, obj):
+        if obj.task and obj.task.objective:
+            return obj.task.objective.title
+        return "-"
+    get_objective.short_description = 'Objective'
+    get_objective.admin_order_field = 'task__objective__title'
     
-    def task_link(self, obj):
-        url = reverse('admin:tasks_task_change', args=[obj.task.id])
-        return format_html('<a href="{}" style="color: #2563eb; font-weight: bold;">{}</a>', url, obj.task.title)
-    
-    task_link.short_description = 'Task'
-    task_link.admin_order_field = 'task__title' 
+    # 2. Safely grab the Task Title
+    def get_task(self, obj):
+        if obj.task:
+            return obj.task.title
+        return "-"
+    get_task.short_description = 'Task'
+    get_task.admin_order_field = 'task__title'
 
+    # --- IMMUTABLE SETTINGS ---
     def get_readonly_fields(self, request, obj=None):
         return ('created_at', 'user')
 
@@ -393,24 +410,20 @@ class NoteAdmin(admin.ModelAdmin):
             obj.user = request.user
         super().save_model(request, obj, form, change)
 
-    # --- NEW: IMMUTABLE STANDALONE NOTES ---
     def has_change_permission(self, request, obj=None):
-        # If the object already exists (editing), deny permission.
-        # Django will automatically hide the "Save" buttons and lock all fields.
         if obj is not None:
             return False
         return super().has_change_permission(request, obj)
 
     def has_delete_permission(self, request, obj=None):
-        # Completely removes the red "Delete" button
         return False
 
-    list_filter = (
-        ('user', admin.RelatedOnlyFieldListFilter), 
-        'created_at',                               
-    )
+    # --- FILTERS & SEARCH ---
+    list_filter = ('created_at', 'user')
+    search_fields = ('text', 'user__username', 'task__title')
     date_hierarchy = 'created_at' 
 
+    # --- SECURITY & HIERARCHY ---
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         if request.user.is_superuser:
@@ -424,7 +437,6 @@ class NoteAdmin(admin.ModelAdmin):
             elif role == 'SUP':
                 return qs.filter(
                     Q(task__owner__profile__tenant=tenant) &
-                    # FIX: Plural 'assigned_supervisors'
                     (Q(task__owner=request.user) | Q(task__supervisor=request.user) | Q(task__owner__profile__assigned_supervisors=request.user))
                 ).distinct()
             elif role == 'SUB':

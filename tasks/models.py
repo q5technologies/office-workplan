@@ -69,11 +69,12 @@ class Note(models.Model):
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='notes')
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     text = models.TextField()
+    reply_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.CASCADE, related_name='replies')
     created_at = models.DateTimeField(auto_now_add=True) # Automatic timestamp
 
     def __str__(self):
         return f"Note by {self.user.username} on {self.task.title}"
     
     class Meta:
-        ordering = ['created_at']  # Oldest notes first
+        ordering = ['-created_at']  # Newest notes first
     
