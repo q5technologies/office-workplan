@@ -235,25 +235,44 @@ class NoteInline(admin.TabularInline):
         # This completely hides the "Delete" checkbox on inline notes.
         return False
 
-class TaskInline(admin.TabularInline):
+class TaskInline(admin.StackedInline): # <--- FIX: Changed from TabularInline to StackedInline!
     model = Task
-    extra = 0
+    extra = 1
+    # This controls the order. Notes will appear underneath the task fields.
+    fields = ('title', 'status', 'owner', 'supervisor', 'display_notes')
     readonly_fields = ('display_notes',)
 
     def display_notes(self, obj):
-        # This shows a preview of notes directly in the task row
-        notes = obj.notes.all().order_by('-created_at')[:3]
-        return mark_safe("<br>".join([f"<b>{n.user.username}:</b> {n.text}" for n in notes]))
-    display_notes.short_description = "Recent Notes"
-    
+        # If it's a brand new blank row, don't try to load notes
+        if not obj.pk:
+            return "Save this task first to add and view notes."
+            
+        notes = obj.notes.all().order_by('-created_at')[:5] # Grabs the 5 most recent notes
+        
+        if not notes:
+            return "No notes yet."
+            
+        # Build a beautiful, distinct HTML box for the notes under the task
+        html = "<div style='background-color: #f8fafc; padding: 15px; border-radius: 6px; border: 1px solid #e2e8f0; margin-top: 5px;'>"
+        for n in notes:
+            html += f"<div style='margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;'>"
+            html += f"<strong style='color: #2563eb;'>{n.user.username}</strong> "
+            html += f"<span style='color: #64748b; font-size: 11px; margin-left: 5px;'>({n.created_at.strftime('%d %b %Y, %H:%M')})</span><br>"
+            html += f"<span style='color: #334155; font-size: 13px;'>{n.text}</span>"
+            html += "</div>"
+        html += "</div>"
+        
+        return mark_safe(html)
+        
+    display_notes.short_description = "Task Notes (Recent)"
+
+    # --- KEEP YOUR EXISTING DROPDOWN SECURITY LOGIC EXACTLY AS IT WAS ---
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        # 1. Allow superusers to see everything
         if request.user.is_superuser:
             if db_field.name in ["owner", "supervisor"]:
                 kwargs["queryset"] = User.objects.all()
             return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-        # 2. Restrict regular users to their own tenant
         if db_field.name in ["owner", "supervisor"]:
             try:
                 role = request.user.profile.role
@@ -262,7 +281,6 @@ class TaskInline(admin.TabularInline):
                 if role in ['SUBSCRIBER', 'HEAD']:
                     kwargs["queryset"] = User.objects.filter(profile__tenant=tenant).distinct()
                 elif role == 'SUP':
-                    # Support for the multiple-supervisor structure
                     subordinate_ids = Profile.objects.filter(assigned_supervisors=request.user, tenant=tenant).values_list('user_id', flat=True)
                     kwargs["queryset"] = User.objects.filter(Q(id=request.user.id) | Q(id__in=subordinate_ids)).distinct()
                 else:
@@ -412,7 +430,7 @@ class NoteAdmin(admin.ModelAdmin):
     
 @admin.register(Objective)
 class ObjectiveAdmin(admin.ModelAdmin):
-    list_display = ['title', 'owner', 'target_number', 'created_at']
+    list_display = ['title', 'target_number',  'owner', 'created_at']
     list_filter = ['created_at']
     search_fields = ['title']
     inlines = [TaskInline]
