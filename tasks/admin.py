@@ -238,8 +238,13 @@ class NoteInline(admin.TabularInline):
 class TaskInline(admin.StackedInline): # <--- FIX: Changed from TabularInline to StackedInline!
     model = Task
     extra = 1
-    # This controls the order. Notes will appear underneath the task fields.
-    fields = ('title', 'status', 'owner', 'supervisor', 'display_notes')
+    # To make the field card collapsible ---
+    fieldsets = (
+        ('Task Details', {
+            'classes': ('collapse',), # This magic word adds the Show/Hide button!
+            'fields': ('title', 'status', 'owner', 'supervisor', 'display_notes')
+        }),
+    )
     readonly_fields = ('display_notes',)
 
     def display_notes(self, obj):
@@ -247,7 +252,7 @@ class TaskInline(admin.StackedInline): # <--- FIX: Changed from TabularInline to
         if not obj.pk:
             return "Save this task first to add and view notes."
             
-        notes = obj.notes.all().order_by('-created_at')[:5] # Grabs the 5 most recent notes
+        notes = obj.notes.all().order_by('-created_at') # Grabs the 5 most recent notes
         
         if not notes:
             return "No notes yet."
