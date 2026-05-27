@@ -385,18 +385,32 @@ class NoteAdmin(admin.ModelAdmin):
     list_display = ('get_objective', 'get_task', 'text', 'user', 'created_at')
     list_display_links = ('text',) # Make the note text the clickable link to edit
     
-    # 1. Safely grab the Objective Title
+    # 1. Safely grab the Objective Title with a clickable link
     def get_objective(self, obj):
-        if obj.task and obj.task.objective:
-            return obj.task.objective.title
+        try:
+            if obj.task and obj.task.objective:
+                # Dynamically get the app and model name
+                app_label = obj.task.objective._meta.app_label
+                model_name = obj.task.objective._meta.model_name
+                url = reverse(f'admin:{app_label}_{model_name}_change', args=[obj.task.objective.id])
+                return format_html('<a href="{}" style="color: #2563eb; font-weight: bold;">{}</a>', url, obj.task.objective.title)
+        except Exception:
+            pass
         return "-"
     get_objective.short_description = 'Objective'
     get_objective.admin_order_field = 'task__objective__title'
     
-    # 2. Safely grab the Task Title
+    # 2. Safely grab the Task Title with a clickable link
     def get_task(self, obj):
-        if obj.task:
-            return obj.task.title
+        try:
+            if obj.task:
+                # Dynamically get the app and model name
+                app_label = obj.task._meta.app_label
+                model_name = obj.task._meta.model_name
+                url = reverse(f'admin:{app_label}_{model_name}_change', args=[obj.task.id])
+                return format_html('<a href="{}" style="color: #2563eb; font-weight: bold;">{}</a>', url, obj.task.title)
+        except Exception:
+            pass
         return "-"
     get_task.short_description = 'Task'
     get_task.admin_order_field = 'task__title'
