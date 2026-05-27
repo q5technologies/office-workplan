@@ -435,10 +435,37 @@ class NoteAdmin(admin.ModelAdmin):
     
 @admin.register(Objective)
 class ObjectiveAdmin(admin.ModelAdmin):
-    list_display = ['title', 'target_number',  'owner', 'created_at']
+    # --- FIX: Replaced 'actual_number' with the visual 'achievement_rating' ---
+    list_display = ['title', 'owner', 'target_number', 'actual_number', 'achievement_rating', 'created_at']
     list_filter = ['created_at']
     search_fields = ['title']
     inlines = [TaskInline]
+
+    # --- NEW: Visual Progress Bar ---
+    def achievement_rating(self, obj):
+        pct = obj.completion_percentage
+        if pct is None:
+            return "-"
+            
+        # Determine color based on performance
+        if pct >= 100:
+            color = "#22c55e" # Green
+        elif pct >= 50:
+            color = "#f59e0b" # Yellow
+        else:
+            color = "#ef4444" # Red
+            
+        capped_pct = min(pct, 100) # Prevents the bar from breaking if they exceed 100%
+        
+        # Returns a mini progress bar and the percentage number
+        return format_html(
+            '''<div style="width: 100px; background-color: #e2e8f0; border-radius: 4px; overflow: hidden; display: inline-block; vertical-align: middle;">
+                <div style="width: {}%; background-color: {}; height: 8px;"></div>
+               </div>
+               <span style="margin-left: 8px; font-weight: bold; color: {};">{}%</span>''',
+            capped_pct, color, color, pct
+        )
+    achievement_rating.short_description = "Target Achieved"
 
     formfield_overrides = {
         models.TextField: {'widget': AutoResizeTextarea},

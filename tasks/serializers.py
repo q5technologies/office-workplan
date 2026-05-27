@@ -21,9 +21,12 @@ class ObjectiveSerializer(serializers.ModelSerializer):
     # --- Allow frontends to send an 'owner_id' to assign it to someone else ---
     owner_id = serializers.IntegerField(write_only=True, required=False)
 
+    # --- NEW: Expose the computed percentage to the API ---
+    completion_percentage = serializers.ReadOnlyField()
+
     class Meta:
         model = Objective
-        fields = ['id', 'title', 'description', 'owner', 'owner_name', 'target_number', 'tasks_count', 'created_at']
+        fields = ['id', 'title', 'description', 'owner', 'owner_name', 'target_number', 'actual_number', 'completion_percentage', 'tasks_count', 'created_at']
         read_only_fields = ['owner']
 
     def get_tasks_count(self, obj):

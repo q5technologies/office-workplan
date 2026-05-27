@@ -8,7 +8,22 @@ class Objective(models.Model):
     
     # Optional target number (e.g., 5000 for a sales goal, or left blank for a qualitative goal)
     target_number = models.IntegerField(null=True, blank=True) 
+
+    # --- What you have actually achieved so far ---
+    actual_number = models.IntegerField(null=True, blank=True, default=0)
+
     created_at = models.DateTimeField(auto_now_add=True)
+
+    # Dynamic calculation of target achievement ---
+    @property
+    def completion_percentage(self):
+        # If there is no target, we can't calculate a percentage
+        if not self.target_number or self.target_number <= 0:
+            return None
+            
+        actual = self.actual_number if self.actual_number else 0
+        pct = (actual / self.target_number) * 100
+        return round(pct, 1)
 
     def __str__(self):
         return self.title
