@@ -434,7 +434,7 @@ class NoteAdmin(admin.ModelAdmin):
         return False
 
     # --- FILTERS & SEARCH ---
-    list_filter = ('created_at', 'user')
+    list_filter = ('created_at', 'note__user')
     search_fields = ('text', 'user__username', 'task__title')
     date_hierarchy = 'created_at' 
 
