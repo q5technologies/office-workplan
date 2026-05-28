@@ -76,5 +76,5 @@ class Note(models.Model):
         return f"Note by {self.user.username} on {self.task.title}"
     
     class Meta:
-        ordering = ['-created_at']  # Newest notes first
+        ordering = ['created_at']  # Newest notes first
     
