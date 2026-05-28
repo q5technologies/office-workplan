@@ -254,7 +254,7 @@ class TaskInline(admin.StackedInline): # <--- FIX: Changed from TabularInline to
             return "Save this task first to add and view notes."
             
         # --- FIX: Only fetch top-level notes for the initial loop ---
-        top_notes = obj.notes.filter(reply_to__isnull=True).order_by('-created_at') # Limit to 5 most recent top-level notes
+        top_notes = obj.notes.filter(reply_to__isnull=True).order_by('created_at') # Limit to 5 most recent top-level notes
         
         if not top_notes:
             return "No notes yet."
