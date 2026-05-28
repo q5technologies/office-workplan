@@ -224,7 +224,7 @@ class NoteInline(admin.TabularInline):
 
     # Restrict notes to only show notes for the specific task
     def get_queryset(self, request):
-        return super().get_queryset(request).order_by('-created_at')
+        return super().get_queryset(request).order_by('created_at')
 
     # --- NEW: IMMUTABLE INLINE NOTES ---
     def has_change_permission(self, request, obj=None):
