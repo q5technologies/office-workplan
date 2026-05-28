@@ -73,7 +73,9 @@ class Note(models.Model):
     created_at = models.DateTimeField(auto_now_add=True) # Automatic timestamp
 
     def __str__(self):
-        return f"Note by {self.user.username} on {self.task.title}"
+        # Truncate the text to 50 characters so it fits neatly in the dropdown
+        short_text = (self.text[:50] + '...') if len(self.text) > 50 else self.text
+        return f"{self.user.username}: {short_text}"
     
     class Meta:
         ordering = ['created_at']  # Newest notes first
