@@ -215,18 +215,31 @@ class ProfileAdmin(admin.ModelAdmin):
 class NoteInline(admin.TabularInline):
     model = Note
     extra = 0
-    fields = ('user', 'text', 'created_at')
+    fields = ('user', 'text', 'reply_to', 'created_at')
     readonly_fields = ('user', 'created_at')
 
     formfield_overrides = {
         models.TextField: {'widget': AutoResizeTextarea},
     }
 
-    # Restrict notes to only show notes for the specific task
+    # Restrict notes to only show notes for the specific task and optimize queries
     def get_queryset(self, request):
-        return super().get_queryset(request).order_by('created_at')
+        return super().get_queryset(request).select_related('user', 'task').order_by('created_at')
 
-    # --- NEW: IMMUTABLE INLINE NOTES ---
+    # --- NEW: FILTER 'REPLY TO' DROPDOWN ---
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "reply_to":
+            # Extract the ID of the Task we are currently viewing from the URL
+            task_id = request.resolver_match.kwargs.get('object_id')
+            if task_id:
+                # Only allow users to reply to notes that belong to this specific task
+                kwargs["queryset"] = Note.objects.filter(task_id=task_id).order_by('created_at')
+            else:
+                # If we are creating a brand new task, there are no notes to reply to yet
+                kwargs["queryset"] = Note.objects.none()
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    # --- IMMUTABLE INLINE NOTES ---
     def has_change_permission(self, request, obj=None):
         # Returning False makes existing notes read-only plain text.
         # It still allows the blank "extra" row at the bottom for adding new notes!
@@ -383,7 +396,7 @@ class TaskAdmin(admin.ModelAdmin):
 @admin.register(Note)
 class NoteAdmin(admin.ModelAdmin):
     # Safe list display without URL routing lookups
-    list_display = ('get_objective', 'get_task', 'text', 'user', 'created_at')
+    list_display = ('get_objective', 'get_task', 'text', 'reply_to', 'user', 'created_at')
     list_display_links = ('text',) # Make the note text the clickable link to edit
     
     # 1. Safely grab the Objective Title with a clickable link
