@@ -222,31 +222,32 @@ class NoteInline(admin.TabularInline):
         models.TextField: {'widget': AutoResizeTextarea},
     }
 
-    # Restrict notes to only show notes for the specific task and optimize queries
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('user', 'task').order_by('created_at')
 
-    # --- NEW: FILTER 'REPLY TO' DROPDOWN ---
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "reply_to":
-            # Extract the ID of the Task we are currently viewing from the URL
             task_id = request.resolver_match.kwargs.get('object_id')
             if task_id:
-                # Only allow users to reply to notes that belong to this specific task
                 kwargs["queryset"] = Note.objects.filter(task_id=task_id).order_by('created_at')
             else:
-                # If we are creating a brand new task, there are no notes to reply to yet
                 kwargs["queryset"] = Note.objects.none()
+            
+            # 1. Generate the dropdown field first
+            field = super().formfield_for_foreignkey(db_field, request, **kwargs)
+            
+            # 2. FIX: Customize the text ONLY for this specific dropdown menu
+            if field:
+                field.label_from_instance = lambda obj: f"{obj.user.username}: {(obj.text[:50] + '...') if len(obj.text) > 50 else obj.text} ({obj.created_at.strftime('%Y-%m-%d %H:%M')})"
+            
+            return field
+            
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-    # --- IMMUTABLE INLINE NOTES ---
     def has_change_permission(self, request, obj=None):
-        # Returning False makes existing notes read-only plain text.
-        # It still allows the blank "extra" row at the bottom for adding new notes!
         return False
 
     def has_delete_permission(self, request, obj=None):
-        # This completely hides the "Delete" checkbox on inline notes.
         return False
     
 
