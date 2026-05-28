@@ -235,6 +235,8 @@ class NoteInline(admin.TabularInline):
     def has_delete_permission(self, request, obj=None):
         # This completely hides the "Delete" checkbox on inline notes.
         return False
+    class meta:
+        ordering = ['-created_at']
 
 class TaskInline(admin.StackedInline): # <--- FIX: Changed from TabularInline to StackedInline!
     model = Task
