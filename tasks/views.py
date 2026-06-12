@@ -166,10 +166,17 @@ class TaskViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         user = self.request.user
-        role = user.profile.role
+        role = getattr(user.profile, 'role', 'SUB')
+        
         if role == 'SUB':
-            assigned_sup = user.profile.assigned_supervisor
+            # FIX: Grab the first supervisor from the new ManyToMany 'assigned_supervisors' list
+            default_sup = user.profile.assigned_supervisors.first()
+            
+            # If the frontend passes a specific supervisor, use it; otherwise, use the default
+            assigned_sup = serializer.validated_data.get('supervisor', default_sup)
+            
             serializer.save(owner=user, supervisor=assigned_sup)
+            
         elif role in ['HEAD', 'SUBSCRIBER']:
             assigned_sup_user = serializer.validated_data.get('supervisor')
             if assigned_sup_user:
