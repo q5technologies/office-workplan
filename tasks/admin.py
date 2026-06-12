@@ -198,14 +198,25 @@ class ProfileAdmin(admin.ModelAdmin):
     
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if request.user.is_superuser and db_field.name == "user":
-            # Only show Subscribers and Superusers in the User dropdown
-            kwargs["queryset"] = User.objects.filter(Q(profile__role='SUBSCRIBER') | Q(is_superuser=True)).distinct()
+            # 1. FIX: Filter out deleted/inactive users using is_active=True
+            kwargs["queryset"] = User.objects.filter(
+                Q(profile__role='SUBSCRIBER') | Q(is_superuser=True), 
+                is_active=True
+            ).distinct()
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def formfield_for_manytomany(self, db_field, request, **kwargs):
-        if request.user.is_superuser and db_field.name == "assigned_supervisors":
-            # Only show Subscribers in the Supervisors list
-            kwargs["queryset"] = User.objects.filter(profile__role='SUBSCRIBER')
+        if db_field.name == "assigned_supervisors":
+            if request.user.is_superuser:
+                kwargs["queryset"] = User.objects.filter(profile__role='SUBSCRIBER', is_active=True)
+            else:
+                try:
+                    # 2. FIX: Restrict the supervisor list to ONLY active users in their specific tenant!
+                    tenant = request.user.profile.tenant
+                    kwargs["queryset"] = User.objects.filter(profile__tenant=tenant, is_active=True).distinct()
+                except Exception:
+                    kwargs["queryset"] = User.objects.none()
+                    
         return super().formfield_for_manytomany(db_field, request, **kwargs)
 
 
@@ -315,7 +326,7 @@ class TaskInline(admin.StackedInline): # <--- FIX: Changed from TabularInline to
                     subordinate_ids = Profile.objects.filter(assigned_supervisors=request.user, tenant=tenant).values_list('user_id', flat=True)
                     kwargs["queryset"] = User.objects.filter(Q(id=request.user.id) | Q(id__in=subordinate_ids)).distinct()
                 else:
-                    kwargs["queryset"] = User.objects.filter(id=request.user.id)
+                    kwargs["queryset"] = User.objects.filter(id=request.user.id, is_active=True)
             except Exception:
                 kwargs["queryset"] = User.objects.none()
                     
@@ -375,14 +386,14 @@ class TaskAdmin(admin.ModelAdmin):
                 role = request.user.profile.role
                 tenant = request.user.profile.tenant
                 if role in ['SUBSCRIBER', 'HEAD']:
-                    kwargs["queryset"] = User.objects.filter(profile__tenant=tenant).distinct()
+                    kwargs["queryset"] = User.objects.filter(profile__tenant=tenant, is_active=True).distinct()
                 elif role == 'SUP':
                     # 2. FIX: Updated to 'assigned_supervisors' to support the new multiple-supervisor database structure
                     kwargs["queryset"] = User.objects.filter(
                         Q(id=request.user.id) | Q(profile__assigned_supervisors=request.user)
                     ).distinct()
                 else:
-                    kwargs["queryset"] = User.objects.filter(id=request.user.id)
+                    kwargs["queryset"] = User.objects.filter(id=request.user.id, is_active=True)
             except Exception:
                 kwargs["queryset"] = User.objects.none()
 
@@ -540,14 +551,14 @@ class ObjectiveAdmin(admin.ModelAdmin):
                 tenant = request.user.profile.tenant
                 if role in ['HEAD', 'SUBSCRIBER']:
                     # Heads can pick anyone in the company
-                    kwargs["queryset"] = User.objects.filter(profile__tenant=tenant)
+                    kwargs["queryset"] = User.objects.filter(profile__tenant=tenant, is_active=True).distinct()
                 elif role == 'SUP':
                     # Supervisors can pick themselves or their direct subordinates
                     subordinate_ids = Profile.objects.filter(assigned_supervisors=request.user, tenant=tenant).values_list('user_id', flat=True)
-                    kwargs["queryset"] = User.objects.filter(Q(id=request.user.id) | Q(id__in=subordinate_ids)).distinct()
+                    kwargs["queryset"] = User.objects.filter(Q(id=request.user.id) | Q(id__in=subordinate_ids), is_active=True).distinct()
                 else:
                     # Subordinates can only pick themselves
-                    kwargs["queryset"] = User.objects.filter(id=request.user.id)
+                    kwargs["queryset"] = User.objects.filter(id=request.user.id, is_active=True)
             except Exception:
                 kwargs["queryset"] = User.objects.none()
                 
