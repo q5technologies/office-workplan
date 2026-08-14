@@ -277,7 +277,7 @@ class TaskInline(admin.StackedInline): # <--- FIX: Changed from TabularInline to
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         if request.user.is_superuser:
-            return qs
+            return qs.none() # Superusers should not see tasks in the Objective inline
         try:
             tenant = request.user.profile.tenant
             return qs.filter(owner__profile__tenant=tenant)
@@ -322,7 +322,7 @@ class TaskInline(admin.StackedInline): # <--- FIX: Changed from TabularInline to
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if request.user.is_superuser:
             if db_field.name in ["owner", "supervisor"]:
-                kwargs["queryset"] = User.objects.all()
+                kwargs["queryset"] = User.objects.none()
             return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
         if db_field.name in ["owner", "supervisor"]:
@@ -364,7 +364,7 @@ class TaskAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super().get_queryset(request).prefetch_related('notes', 'notes__user')
         if request.user.is_superuser:
-            return qs 
+            return qs.none() # Superusers should not see tasks in the main Task table 
             
         try:
             role = request.user.profile.role
@@ -386,7 +386,7 @@ class TaskAdmin(admin.ModelAdmin):
         # 1. FIX: Allow Superusers to see all users instead of an empty list
         if request.user.is_superuser:
             if db_field.name in ["owner", "supervisor"]:
-                kwargs["queryset"] = User.objects.all() 
+                kwargs["queryset"] = User.objects.none() 
             return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
         if db_field.name in ["owner", "supervisor"]:
@@ -475,7 +475,7 @@ class NoteAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         if request.user.is_superuser:
-            return qs 
+            return qs.none() # Superusers should not see notes in the main Note table 
             
         try:
             role = request.user.profile.role
@@ -535,7 +535,7 @@ class ObjectiveAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         if request.user.is_superuser:
-            return qs 
+            return qs.none() # Superusers should not see objectives in the main Objective table 
 
         try:
             role = request.user.profile.role
