@@ -274,6 +274,16 @@ class TaskInline(admin.StackedInline): # <--- FIX: Changed from TabularInline to
     )
     readonly_fields = ('display_notes',)
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        try:
+            tenant = request.user.profile.tenant
+            return qs.filter(owner__profile__tenant=tenant)
+        except Exception:
+            return qs.none()
+
     def display_notes(self, obj):
         if not obj.pk:
             return "Save this task first to add and view notes."
@@ -352,8 +362,7 @@ class TaskAdmin(admin.ModelAdmin):
         formset.save_m2m()
 
     def get_queryset(self, request):
-        return super().get_queryset(request).prefetch_related('notes', 'notes__user')
-        qs = super().get_queryset(request)
+        qs = super().get_queryset(request).prefetch_related('notes', 'notes__user')
         if request.user.is_superuser:
             return qs 
             
@@ -365,11 +374,10 @@ class TaskAdmin(admin.ModelAdmin):
             elif role == 'SUP':
                 return qs.filter(
                     Q(owner__profile__tenant=tenant) &
-                    # FIX: Plural 'assigned_supervisors'
                     (Q(owner=request.user) | Q(supervisor=request.user) | Q(owner__profile__assigned_supervisors=request.user))
                 ).distinct()
             elif role == 'SUB':
-                return qs.filter(owner=request.user).distinct()
+                return qs.filter(owner=request.user, owner__profile__tenant=tenant).distinct()
         except Exception:
             pass
         return qs.none()
