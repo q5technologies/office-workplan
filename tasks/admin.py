@@ -7,7 +7,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.forms import Textarea
 from django.utils.safestring import mark_safe
 from django.utils.html import format_html
-from django.urls import reverse
+from django.urls import reverse, path
+from django.http import HttpResponse
 
 from .models import Task, Note, Objective, MonthlyWorkplan, WorkplanActivity
 from users.models import Profile, Subscription
@@ -582,10 +583,70 @@ class ObjectiveAdmin(admin.ModelAdmin):
 
 class WorkplanActivityInline(admin.TabularInline):
     model = WorkplanActivity
-    extra = 1 # Shows one blank extra row by default
+    extra = 1
 
 @admin.register(MonthlyWorkplan)
 class MonthlyWorkplanAdmin(admin.ModelAdmin):
     list_display = ('owner', 'month', 'created_at')
     list_filter = ('month', 'owner')
     inlines = [WorkplanActivityInline]
+    
+    # 1. Add the custom button to the fields displayed on the form
+    readonly_fields = ('print_pdf_button',)
+
+    # 2. Define the HTML for the button
+    def print_pdf_button(self, obj):
+        # Only show the button if the workplan has been saved and has an ID
+        if obj.pk:
+            url = f'/admin/tasks/monthlyworkplan/{obj.pk}/print/'
+            return format_html(
+                '<a href="{}" class="button" style="padding: 10px 15px; background-color: #417690; color: white; font-weight: bold; text-decoration: none; border-radius: 4px;">🖨️ Download PDF Workplan</a>',
+                url
+            )
+        return "Save this workplan first to generate a PDF."
+    print_pdf_button.short_description = "Export Workplan"
+
+    # 3. Register a custom URL route exclusively for the admin panel
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                '<int:workplan_id>/print/',
+                self.admin_site.admin_view(self.generate_admin_pdf),
+                name='admin-workplan-print',
+            ),
+        ]
+        return custom_urls + urls
+
+    # 4. Generate the PDF (Inherits standard Admin authentication)
+    def generate_admin_pdf(self, request, workplan_id):
+        workplan = self.get_object(request, workplan_id)
+        activities = workplan.activities.all().order_by('date')
+
+        month_str = workplan.month.strftime('%B %Y')
+        response = HttpResponse(content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Workplan_{month_str}.pdf"'
+
+        doc = SimpleDocTemplate(response, pagesize=letter)
+        
+        data = [['Date', 'Activity', 'Location', 'Status']]
+        for act in activities:
+            data.append([
+                act.date.strftime('%Y-%m-%d'),
+                act.description,
+                act.location or 'N/A',
+                act.get_status_display()
+            ])
+
+        table = Table(data, colWidths=[80, 220, 130, 70])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#417690")), # Matches Django Admin blue
+            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0,0), (-1,0), 10),
+            ('GRID', (0,0), (-1,-1), 1, colors.black),
+        ]))
+
+        doc.build([table])
+        return response
