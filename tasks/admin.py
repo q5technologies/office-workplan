@@ -605,6 +605,12 @@ class WorkplanActivityInline(admin.TabularInline):
                     kwargs["queryset"] = Task.objects.filter(owner__profile__tenant=tenant)
                 except Exception:
                     kwargs["queryset"] = Task.objects.all()
+            
+            # Intercept the generated dropdown to embed the owner_id for JavaScript
+            field = super().formfield_for_foreignkey(db_field, request, **kwargs)
+            if field:
+                field.label_from_instance = lambda obj: f"{obj.title} [owner_id:{obj.owner_id}]"
+            return field
                 
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
