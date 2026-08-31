@@ -621,7 +621,7 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
     # 4. Generate the PDF (Inherits standard Admin authentication)
     def generate_admin_pdf(self, request, workplan_id):
         workplan = self.get_object(request, workplan_id)
-        activities = workplan.activities.all().order_by('date')
+        activities = workplan.workplanactivity_set.all().order_by('date')
 
         month_str = workplan.month.strftime('%B %Y')
         response = HttpResponse(content_type='application/pdf')
