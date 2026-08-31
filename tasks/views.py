@@ -9,7 +9,7 @@ from django.db.models import Q, Prefetch
 from django.utils import timezone 
 from .models import Task, Note, Objective, MonthlyWorkplan, WorkplanActivity
 from users.models import Profile, Subscription
-from .serializers import TaskSerializer, NoteSerializer, ProfileSerializer, ChangePasswordSerializer, TenantUserCreateSerializer, ObjectiveSerializer
+from .serializers import TaskSerializer, NoteSerializer, ProfileSerializer, ChangePasswordSerializer, TenantUserCreateSerializer, ObjectiveSerializer, MonthlyWorkplanSerializer, WorkplanActivitySerializer
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist
