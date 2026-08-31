@@ -618,12 +618,21 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
         ]
         return custom_urls + urls
 
-    # 4. Generate the PDF (Inherits standard Admin authentication)
     def generate_admin_pdf(self, request, workplan_id):
         workplan = self.get_object(request, workplan_id)
-        activities = workplan.workplanactivity_set.all().order_by('date')
+        
+        # Fallback to default reverse related name if 'activities' doesn't exist
+        try:
+            activities = workplan.activities.all().order_by('date')
+        except AttributeError:
+            activities = workplan.workplanactivity_set.all().order_by('date')
 
-        month_str = workplan.month.strftime('%B %Y')
+        # Safely handle the month string or date object
+        if hasattr(workplan.month, 'strftime'):
+            month_str = workplan.month.strftime('%B %Y')
+        else:
+            month_str = str(workplan.month)
+
         response = HttpResponse(content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="Workplan_{month_str}.pdf"'
 
@@ -631,16 +640,22 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
         
         data = [['Date', 'Activity', 'Location', 'Status']]
         for act in activities:
+            # Safely handle the activity date string or date object
+            if hasattr(act.date, 'strftime'):
+                act_date = act.date.strftime('%Y-%m-%d')
+            else:
+                act_date = str(act.date)
+
             data.append([
-                act.date.strftime('%Y-%m-%d'),
+                act_date,
                 act.description,
                 act.location or 'N/A',
-                act.get_status_display()
+                act.get_status_display() if hasattr(act, 'get_status_display') else act.status
             ])
 
         table = Table(data, colWidths=[80, 220, 130, 70])
         table.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#417690")), # Matches Django Admin blue
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#417690")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'LEFT'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
