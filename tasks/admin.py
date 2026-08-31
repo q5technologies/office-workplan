@@ -9,7 +9,9 @@ from django.utils.safestring import mark_safe
 from django.utils.html import format_html
 from django.urls import reverse, path
 from django.http import HttpResponse
-
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.lib import colors
 from .models import Task, Note, Objective, MonthlyWorkplan, WorkplanActivity
 from users.models import Profile, Subscription
 
