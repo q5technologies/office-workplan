@@ -157,7 +157,11 @@ STATICFILES_DIRS = [
 ]
 
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
-
+STORAGES = {
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 # PWA Settings
 PWA_APP_NAME = 'Task Supervisor'
 PWA_APP_DESCRIPTION = "Office Workplan and Task Management System"
