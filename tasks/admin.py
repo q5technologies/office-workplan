@@ -590,27 +590,18 @@ class WorkplanActivityInline(admin.TabularInline):
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "task":
-            workplan_id = request.resolver_match.kwargs.get('object_id')
-            
-            if workplan_id:
-                try:
-                    workplan = MonthlyWorkplan.objects.get(pk=workplan_id)
-                    kwargs["queryset"] = Task.objects.filter(owner=workplan.owner)
-                except MonthlyWorkplan.DoesNotExist:
-                    kwargs["queryset"] = Task.objects.none()
-            else:
-                # Provide all active tenant tasks on creation so JS can read options
-                try:
-                    tenant = request.user.profile.tenant
-                    kwargs["queryset"] = Task.objects.filter(owner__profile__tenant=tenant)
-                except Exception:
-                    kwargs["queryset"] = Task.objects.all()
-            
+            # Always supply all available tenant tasks so JS has the complete choice list
+            try:
+                tenant = request.user.profile.tenant
+                kwargs["queryset"] = Task.objects.filter(owner__profile__tenant=tenant)
+            except Exception:
+                kwargs["queryset"] = Task.objects.all()
+
             field = super().formfield_for_foreignkey(db_field, request, **kwargs)
             if field:
                 field.label_from_instance = lambda obj: f"{obj.title} [owner_id:{obj.owner_id}]"
             return field
-                
+
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 @admin.register(MonthlyWorkplan)
@@ -746,4 +737,8 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
         return response
 
     class Media:
-        js = ('admin/js/workplan_task_filter.js',)
+        js = (
+            'admin/js/vendor/jquery/jquery.js',
+            'admin/js/jquery.init.js',
+            'admin/js/workplan_task_filter.js',
+        )
