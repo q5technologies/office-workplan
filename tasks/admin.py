@@ -588,10 +588,28 @@ class WorkplanActivityInline(admin.TabularInline):
     model = WorkplanActivity
     extra = 1
 
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "task":
+            # Extract the ID of the MonthlyWorkplan currently being viewed/edited
+            workplan_id = request.resolver_match.kwargs.get('object_id')
+            
+            if workplan_id:
+                try:
+                    workplan = MonthlyWorkplan.objects.get(pk=workplan_id)
+                    # Filter the dropdown to only show tasks owned by this workplan's owner
+                    kwargs["queryset"] = Task.objects.filter(owner=workplan.owner)
+                except MonthlyWorkplan.DoesNotExist:
+                    kwargs["queryset"] = Task.objects.none()
+            else:
+                # Fallback for when creating a brand new workplan before the first save
+                kwargs["queryset"] = Task.objects.filter(owner=request.user)
+                
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
 @admin.register(MonthlyWorkplan)
 class MonthlyWorkplanAdmin(admin.ModelAdmin):
     list_display = ('owner', 'month', 'created_at')
-    list_filter = ('month', ('user', admin.RelatedOnlyFieldListFilter))
+    list_filter = ('month', ('owner', admin.RelatedOnlyFieldListFilter))
     
     inlines = [WorkplanActivityInline]
     

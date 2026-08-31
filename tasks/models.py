@@ -102,6 +102,7 @@ class WorkplanActivity(models.Model):
 
     workplan = models.ForeignKey(MonthlyWorkplan, on_delete=models.CASCADE, related_name='activities')
     date = models.DateField()
+    task = models.ForeignKey('Task', on_delete=models.SET_NULL, null=True, blank=True, related_name='workplan_activities')
     description = models.CharField(max_length=255)
     location = models.CharField(max_length=255, blank=True, null=True)
     status = models.CharField(
