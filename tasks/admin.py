@@ -591,8 +591,8 @@ class WorkplanActivityInline(admin.TabularInline):
 @admin.register(MonthlyWorkplan)
 class MonthlyWorkplanAdmin(admin.ModelAdmin):
     list_display = ('owner', 'month', 'created_at')
-    list_filter = ('created_at', ('user', admin.RelatedOnlyFieldListFilter))
-    date_hierarchy = 'created_at' 
+    list_filter = ('month', 'owner')
+    
     inlines = [WorkplanActivityInline]
     
     readonly_fields = ('print_pdf_button',)
