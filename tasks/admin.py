@@ -591,7 +591,7 @@ class WorkplanActivityInline(admin.TabularInline):
 @admin.register(MonthlyWorkplan)
 class MonthlyWorkplanAdmin(admin.ModelAdmin):
     list_display = ('owner', 'month', 'created_at')
-    list_filter = ('month', ('owner', admin.RelatedOnlyFieldListFilter))
+    list_filter = ('month', ('user', admin.RelatedOnlyFieldListFilter))
     
     inlines = [WorkplanActivityInline]
     
