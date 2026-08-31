@@ -594,12 +594,47 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
     list_filter = ('month', 'owner')
     inlines = [WorkplanActivityInline]
     
-    # 1. Add the custom button to the fields displayed on the form
     readonly_fields = ('print_pdf_button',)
 
-    # 2. Define the HTML for the button
+    # 1. Filter the main table so users only see workplans from their organization
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs.none() 
+
+        try:
+            role = request.user.profile.role
+            tenant = request.user.profile.tenant
+            if role in ['HEAD', 'SUBSCRIBER']:
+                return qs.filter(owner__profile__tenant=tenant)
+            elif role == 'SUP':
+                subordinate_ids = Profile.objects.filter(assigned_supervisors=request.user, tenant=tenant).values_list('user_id', flat=True)
+                return qs.filter(Q(owner=request.user) | Q(owner_id__in=subordinate_ids)).distinct()
+            elif role == 'SUB':
+                return qs.filter(owner=request.user)
+        except Exception:
+            pass
+        return qs.none()
+
+    # 2. Secure the "Owner" dropdown so they can only assign workplans to allowed people
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "owner" and not request.user.is_superuser:
+            try:
+                role = request.user.profile.role
+                tenant = request.user.profile.tenant
+                if role in ['HEAD', 'SUBSCRIBER']:
+                    kwargs["queryset"] = User.objects.filter(profile__tenant=tenant, is_active=True).distinct()
+                elif role == 'SUP':
+                    subordinate_ids = Profile.objects.filter(assigned_supervisors=request.user, tenant=tenant).values_list('user_id', flat=True)
+                    kwargs["queryset"] = User.objects.filter(Q(id=request.user.id) | Q(id__in=subordinate_ids), is_active=True).distinct()
+                else:
+                    kwargs["queryset"] = User.objects.filter(id=request.user.id, is_active=True)
+            except Exception:
+                kwargs["queryset"] = User.objects.none()
+                
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
     def print_pdf_button(self, obj):
-        # Only show the button if the workplan has been saved and has an ID
         if obj.pk:
             url = f'/admin/tasks/monthlyworkplan/{obj.pk}/print/'
             return format_html(
@@ -609,7 +644,6 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
         return "Save this workplan first to generate a PDF."
     print_pdf_button.short_description = "Export Workplan"
 
-    # 3. Register a custom URL route exclusively for the admin panel
     def get_urls(self):
         urls = super().get_urls()
         custom_urls = [
@@ -636,25 +670,23 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
         else:
             month_str = str(workplan.month)
 
-        # Retrieve the workplan owner's full name (or username)
-        if workplan.owner:
-            owner_name = workplan.owner.get_full_name() or workplan.owner.username
-        else:
-            owner_name = request.user.get_full_name() or request.user.username
+        # Extract first and last name, falling back to username if empty
+        owner = workplan.owner if workplan.owner else request.user
+        full_name = f"{owner.first_name} {owner.last_name}".strip()
+        owner_name = full_name if full_name else owner.username
 
         response = HttpResponse(content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="Workplan_{month_str}.pdf"'
 
         doc = SimpleDocTemplate(response, pagesize=letter)
         
-        # Construct header elements
+        # Construct header elements using the Full Name
         styles = getSampleStyleSheet()
-        header_text = f"<b>User:</b> {owner_name}<br/><b>Month:</b> {month_str}"
+        header_text = f"<b>Name:</b> {owner_name}<br/><b>Month:</b> {month_str}"
         header_paragraph = Paragraph(header_text, styles['Heading2'])
 
         data = [['Date', 'Activity', 'Location', 'Status']]
         for act in activities:
-            # Safely handle the activity date string or date object
             if hasattr(act.date, 'strftime'):
                 act_date = act.date.strftime('%Y-%m-%d')
             else:
@@ -677,7 +709,7 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
             ('GRID', (0,0), (-1,-1), 1, colors.black),
         ]))
 
-        # Assemble layout with header text, spacing, and table
+        # Assemble layout
         elements = [
             header_paragraph,
             Spacer(1, 15),
