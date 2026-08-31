@@ -10,7 +10,8 @@ from django.utils.html import format_html
 from django.urls import reverse, path
 from django.http import HttpResponse
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 from .models import Task, Note, Objective, MonthlyWorkplan, WorkplanActivity
 from users.models import Profile, Subscription
@@ -635,11 +636,22 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
         else:
             month_str = str(workplan.month)
 
+        # Retrieve the workplan owner's full name (or username)
+        if workplan.owner:
+            owner_name = workplan.owner.get_full_name() or workplan.owner.username
+        else:
+            owner_name = request.user.get_full_name() or request.user.username
+
         response = HttpResponse(content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="Workplan_{month_str}.pdf"'
 
         doc = SimpleDocTemplate(response, pagesize=letter)
         
+        # Construct header elements
+        styles = getSampleStyleSheet()
+        header_text = f"<b>User:</b> {owner_name}<br/><b>Month:</b> {month_str}"
+        header_paragraph = Paragraph(header_text, styles['Heading2'])
+
         data = [['Date', 'Activity', 'Location', 'Status']]
         for act in activities:
             # Safely handle the activity date string or date object
@@ -665,5 +677,12 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
             ('GRID', (0,0), (-1,-1), 1, colors.black),
         ]))
 
-        doc.build([table])
+        # Assemble layout with header text, spacing, and table
+        elements = [
+            header_paragraph,
+            Spacer(1, 15),
+            table
+        ]
+
+        doc.build(elements)
         return response
