@@ -7,7 +7,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.views import APIView
 from django.db.models import Q, Prefetch
 from django.utils import timezone 
-from .models import Task, Note, Objective
+from .models import Task, Note, Objective, MonthlyWorkplan, WorkplanActivity
 from users.models import Profile, Subscription
 from .serializers import TaskSerializer, NoteSerializer, ProfileSerializer, ChangePasswordSerializer, TenantUserCreateSerializer, ObjectiveSerializer
 from django.db import models
@@ -19,7 +19,8 @@ from django.contrib.auth.decorators import login_required
 import csv
 from datetime import datetime, timedelta
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 
 # ==========================================
@@ -785,3 +786,44 @@ class ObjectiveViewSet(IsActiveSubscriberMixin, viewsets.ModelViewSet):
         else:
             # Default fallback: You are creating the objective for yourself
             serializer.save(owner=user)
+
+class MonthlyWorkplanViewSet(viewsets.ModelViewSet):
+    serializer_class = MonthlyWorkplanSerializer
+
+    def get_queryset(self):
+        return MonthlyWorkplan.objects.filter(owner=self.request.user)
+
+    @action(detail=True, methods=['get'])
+    def print_plan(self, request, pk=None):
+        workplan = self.get_object()
+        activities = workplan.activities.all().order_by('date')
+        
+        month_str = workplan.month.strftime('%B %Y')
+        response = HttpResponse(content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Workplan_{month_str}.pdf"'
+        
+        doc = SimpleDocTemplate(response, pagesize=letter)
+        
+        # Table Headers
+        data = [['Date', 'Activity', 'Location', 'Status']]
+        
+        for act in activities:
+            data.append([
+                act.date.strftime('%Y-%m-%d'), 
+                act.description, 
+                act.location or 'N/A', 
+                act.status
+            ])
+        
+        table = Table(data, colWidths=[80, 220, 130, 70])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1e40af")),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0,0), (-1,0), 10),
+            ('GRID', (0,0), (-1,-1), 1, colors.black),
+        ]))
+        
+        doc.build([table])
+        return response

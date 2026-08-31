@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Task, Note, User, Objective
+from .models import Task, Note, User, Objective, MonthlyWorkplan, WorkplanActivity
 from users.models import Profile, Subscription
 from django.contrib.auth.models import User
 
@@ -132,3 +132,15 @@ class TenantUserCreateSerializer(serializers.ModelSerializer):
         user.profile.save()
         
         return user
+
+class WorkplanActivitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WorkplanActivity
+        fields = '__all__'
+
+class MonthlyWorkplanSerializer(serializers.ModelSerializer):
+    activities = WorkplanActivitySerializer(many=True, read_only=True)
+
+    class Meta:
+        model = MonthlyWorkplan
+        fields = ['id', 'owner', 'month', 'activities', 'created_at']

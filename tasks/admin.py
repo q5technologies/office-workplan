@@ -9,7 +9,7 @@ from django.utils.safestring import mark_safe
 from django.utils.html import format_html
 from django.urls import reverse
 
-from .models import Task, Note, Objective
+from .models import Task, Note, Objective, MonthlyWorkplan, WorkplanActivity
 from users.models import Profile, Subscription
 
 # ==========================================
@@ -578,3 +578,13 @@ class ObjectiveAdmin(admin.ModelAdmin):
     def has_add_permission(self, request): return True
     def has_change_permission(self, request, obj=None): return True
     def has_delete_permission(self, request, obj=None): return True
+
+class WorkplanActivityInline(admin.TabularInline):
+    model = WorkplanActivity
+    extra = 1 # Shows one blank extra row by default
+
+@admin.register(MonthlyWorkplan)
+class MonthlyWorkplanAdmin(admin.ModelAdmin):
+    list_display = ('owner', 'month', 'created_at')
+    list_filter = ('month', 'owner')
+    inlines = [WorkplanActivityInline]

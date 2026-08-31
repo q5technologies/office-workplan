@@ -79,4 +79,40 @@ class Note(models.Model):
     
     class Meta:
         ordering = ['created_at']  # Newest notes first
-    
+
+class MonthlyWorkplan(models.Model):
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='workplans')
+    # Store the month by saving the 1st day of the targeted month (e.g., 2026-08-01)
+    month = models.DateField() 
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('owner', 'month')
+        ordering = ['-month']
+
+    def __str__(self):
+        return f"{self.owner.username} - {self.month.strftime('%Y-%m')}"
+
+class WorkplanActivity(models.Model):
+    # Matches the TextChoices structure from your Task model
+    class Status(models.TextChoices):
+        PENDING = 'PD', 'Pending'
+        COMPLETED = 'CP', 'Completed'
+        POSTPONED = 'PP', 'Postponed'
+
+    workplan = models.ForeignKey(MonthlyWorkplan, on_delete=models.CASCADE, related_name='activities')
+    date = models.DateField()
+    description = models.CharField(max_length=255)
+    location = models.CharField(max_length=255, blank=True, null=True)
+    status = models.CharField(
+        max_length=2,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+
+    def __str__(self):
+        return f"{self.date} - {self.description}"
+        
+    class Meta:
+        ordering = ['date'] # Chronological order for the PDF printout
+        verbose_name_plural = 'Workplan Activities'
