@@ -579,7 +579,7 @@ class ObjectiveAdmin(admin.ModelAdmin):
     def has_change_permission(self, request, obj=None): return True
     def has_delete_permission(self, request, obj=None): return True
 
-@admin.register(WorkplanActivity)
+
 class WorkplanActivityInline(admin.TabularInline):
     model = WorkplanActivity
     extra = 1 # Shows one blank extra row by default
