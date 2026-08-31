@@ -747,4 +747,4 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
         return response
 
     class Media:
-        js = ('TaskSupervisorApp/static/admin/js/workplan_task_filter.js',)
+        js = ('admin/js/workplan_task_filter.js',)

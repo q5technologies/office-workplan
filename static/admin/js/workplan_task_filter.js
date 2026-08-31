@@ -1,5 +1,4 @@
 (function initFilter() {
-    // Wait until django.jQuery is fully available in the DOM
     if (typeof django === 'undefined' || !django.jQuery) {
         setTimeout(initFilter, 50);
         return;
@@ -14,36 +13,46 @@
             const ownerId = $ownerSelect.val();
             const ownerMarker = `[owner_id:${ownerId}]`;
 
-            // Matches inline dropdowns ending in '-task' (e.g. id_activities-0-task)
             $('select[id$="-task"]').each(function() {
                 const $select = $(this);
+                
+                // 1. On first run, cache the original full list of options in memory
+                if (!$select.data('all-options')) {
+                    const allOptions = $select.find('option').map(function() {
+                        const $opt = $(this);
+                        return {
+                            val: $opt.val(),
+                            originalText: $opt.text(),
+                            cleanText: $opt.text().replace(/\s*\[owner_id:\d+\]/, ''),
+                            isBlank: !$opt.val()
+                        };
+                    }).get();
+                    $select.data('all-options', allOptions);
+                }
 
-                $select.find('option').each(function() {
-                    const $option = $(this);
-                    if (!$option.val()) return; // Preserve the blank '---------' option
+                // 2. Remember current selection
+                const currentVal = $select.val();
+                const allOptions = $select.data('all-options');
+                
+                // 3. Clear the DOM dropdown completely
+                $select.empty();
 
-                    // 1. Cache the raw label containing the marker
-                    if (!$option.data('original-text')) {
-                        $option.data('original-text', $option.text());
-                    }
-
-                    const originalText = $option.data('original-text');
-
-                    // 2. Clean the UI label by stripping [owner_id:X]
-                    const cleanText = originalText.replace(/\s*\[owner_id:\d+\]/, '');
-                    $option.text(cleanText);
-
-                    // 3. Filter dropdown options based on selected Workplan owner
-                    if (ownerId && originalText.includes(ownerMarker)) {
-                        $option.prop('disabled', false).show();
-                    } else {
-                        $option.prop('disabled', true).hide();
+                // 4. Rebuild the UI with ONLY matching options (and the blank default)
+                let valueStillValid = false;
+                
+                $.each(allOptions, function(i, opt) {
+                    if (opt.isBlank || (ownerId && opt.originalText.includes(ownerMarker))) {
+                        $select.append($('<option></option>').val(opt.val).text(opt.cleanText));
+                        if (currentVal === opt.val) {
+                            valueStillValid = true;
+                        }
                     }
                 });
 
-                // Reset selection if the currently selected option was disabled
-                const $selected = $select.find('option:selected');
-                if ($selected.length && $selected.prop('disabled')) {
+                // 5. Restore previous selection if it survives the filter, otherwise reset
+                if (valueStillValid) {
+                    $select.val(currentVal);
+                } else {
                     $select.val('');
                 }
             });
@@ -53,7 +62,7 @@
             filterTasks();
             $ownerSelect.on('change', filterTasks);
 
-            // Re-apply filter when new inline rows are added dynamically
+            // Applies filter cleanly to newly added inline rows
             $(document).on('formset:added', function() {
                 filterTasks();
             });
