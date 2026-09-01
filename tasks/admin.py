@@ -702,7 +702,11 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
         header_text = f"<b>Name:</b> {owner_name}<br/><b>Month:</b> {month_str}"
         header_paragraph = Paragraph(header_text, styles['Heading2'])
 
-        # Added 'Task' to the header array
+        # Create a basic style for table cells so long text wraps automatically
+        cell_style = styles['Normal']
+        cell_style.fontSize = 9
+        cell_style.leading = 11  # Line spacing
+
         data = [['Date', 'Task', 'Activity', 'Location', 'Status']]
         
         for act in activities:
@@ -711,19 +715,19 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
             else:
                 act_date = str(act.date)
 
-            # Safely fetch the task name (falls back to N/A if no task is selected)
             task_name = str(act.task) if hasattr(act, 'task') and act.task else 'N/A'
 
             data.append([
                 act_date,
-                task_name,          # Inserted the Task name here
-                act.description,
-                act.location or 'N/A',
+                # Wrap long text fields in a Paragraph to force text wrapping
+                Paragraph(task_name, cell_style),
+                Paragraph(act.description, cell_style),
+                Paragraph(act.location or 'N/A', cell_style),
                 act.get_status_display() if hasattr(act, 'get_status_display') else act.status
             ])
 
-        # Adjusted colWidths to accommodate the new 5th column (Total width = 500)
-        table = Table(data, colWidths=[65, 120, 160, 95, 60])
+        # Adjusted column widths to cleanly fit standard Letter page margins
+        table = Table(data, colWidths=[70, 130, 150, 100, 60])
         
         table.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#417690")),
@@ -732,8 +736,7 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
             ('BOTTOMPADDING', (0,0), (-1,0), 10),
             ('GRID', (0,0), (-1,-1), 1, colors.black),
-            # Prevents long text from overflowing the columns
-            ('VALIGN', (0,0), (-1,-1), 'TOP'), 
+            ('VALIGN', (0,0), (-1,-1), 'TOP'), # Ensures text stays at the top of the cell when wrapping
         ]))
 
         # Assemble layout
