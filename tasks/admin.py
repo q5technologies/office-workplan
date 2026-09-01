@@ -702,21 +702,29 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
         header_text = f"<b>Name:</b> {owner_name}<br/><b>Month:</b> {month_str}"
         header_paragraph = Paragraph(header_text, styles['Heading2'])
 
-        data = [['Date', 'Activity', 'Location', 'Status']]
+        # Added 'Task' to the header array
+        data = [['Date', 'Task', 'Activity', 'Location', 'Status']]
+        
         for act in activities:
             if hasattr(act.date, 'strftime'):
                 act_date = act.date.strftime('%Y-%m-%d')
             else:
                 act_date = str(act.date)
 
+            # Safely fetch the task name (falls back to N/A if no task is selected)
+            task_name = str(act.task) if hasattr(act, 'task') and act.task else 'N/A'
+
             data.append([
                 act_date,
+                task_name,          # Inserted the Task name here
                 act.description,
                 act.location or 'N/A',
                 act.get_status_display() if hasattr(act, 'get_status_display') else act.status
             ])
 
-        table = Table(data, colWidths=[80, 220, 130, 70])
+        # Adjusted colWidths to accommodate the new 5th column (Total width = 500)
+        table = Table(data, colWidths=[65, 120, 160, 95, 60])
+        
         table.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#417690")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
@@ -724,6 +732,8 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
             ('BOTTOMPADDING', (0,0), (-1,0), 10),
             ('GRID', (0,0), (-1,-1), 1, colors.black),
+            # Prevents long text from overflowing the columns
+            ('VALIGN', (0,0), (-1,-1), 'TOP'), 
         ]))
 
         # Assemble layout
