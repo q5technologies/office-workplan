@@ -738,7 +738,5 @@ class MonthlyWorkplanAdmin(admin.ModelAdmin):
 
     class Media:
         js = (
-            'admin/js/vendor/jquery/jquery.js',
-            'admin/js/jquery.init.js',
             'admin/js/workplan_task_filter.js',
         )
